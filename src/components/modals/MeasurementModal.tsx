@@ -21,20 +21,20 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
   const [isCurrent, setIsCurrent] = useState(true);
   const [height, setHeight] = useState<string>('178');
   const [weight, setWeight] = useState<string>('74');
-  const [shoulder, setShoulder] = useState<string>('46.5');
-  const [chest, setChest] = useState<string>('101');
-  const [waist, setWaist] = useState<string>('86');
-  const [hips, setHips] = useState<string>('99');
-  const [sleeveLength, setSleeveLength] = useState<string>('61.5');
-  const [clothLength, setClothLength] = useState<string>('74.5');
-  const [upperArm, setUpperArm] = useState<string>('33.5');
-  const [wrist, setWrist] = useState<string>('17.5');
+  const [shoulder, setShoulder] = useState<string>('1.40');
+  const [chest, setChest] = useState<string>('3.03');
+  const [waist, setWaist] = useState<string>('2.58');
+  const [hips, setHips] = useState<string>('2.97');
+  const [sleeveLength, setSleeveLength] = useState<string>('1.85');
+  const [clothLength, setClothLength] = useState<string>('2.24');
+  const [upperArm, setUpperArm] = useState<string>('1.01');
+  const [wrist, setWrist] = useState<string>('0.53');
 
-  // Custom items
+  // Custom items (统一以“尺”为基准单位)
   const [customItems, setCustomItems] = useState<CustomMeasurementItem[]>([
-    { name: '领围', value: 41, unit: 'cm', remark: '放量2cm' },
-    { name: '裤长', value: 102, unit: 'cm', remark: '微悬口' },
-    { name: '大腿围', value: 58.5, unit: 'cm', remark: '舒适' },
+    { name: '领围', value: 1.23, unit: '尺', remark: '放量0.06尺' },
+    { name: '裤长', value: 3.06, unit: '尺', remark: '微悬口' },
+    { name: '大腿围', value: 1.76, unit: '尺', remark: '舒适' },
   ]);
 
   const [remarks, setRemarks] = useState('');
@@ -44,7 +44,7 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
   if (!isOpen) return null;
 
   const handleAddCustomItem = () => {
-    setCustomItems([...customItems, { name: '', value: 0, unit: 'cm', remark: '' }]);
+    setCustomItems([...customItems, { name: '', value: 0, unit: '尺', remark: '' }]);
   };
 
   const handleRemoveCustomItem = (idx: number) => {
@@ -87,6 +87,7 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
         clothLength: clothLength ? Number(clothLength) : undefined,
         upperArm: upperArm ? Number(upperArm) : undefined,
         wrist: wrist ? Number(wrist) : undefined,
+        unit: '尺', // 统一以“尺”作为量体基准单位
         customItems: filteredCustom,
         remarks: remarks.trim(),
       });
@@ -170,8 +171,10 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
           {/* Standard body sizes */}
           <div>
             <h4 className="text-sm font-bold text-stone-900 border-b border-stone-200 pb-2 mb-3 flex items-center justify-between">
-              <span>核心体型尺寸 (标准单位: cm / kg)</span>
-              <span className="text-xs font-normal text-stone-500">西装/衬衫制版核心依据</span>
+              <span>核心体型尺寸 (量体尺寸统一基准单位: 尺)</span>
+              <span className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                单位统一为“尺”，支持 2.35尺、2.48尺、2.60尺等小数
+              </span>
             </h4>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               <div>
@@ -195,81 +198,89 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">肩宽 (cm)</label>
+                <label className="block text-xs font-medium text-stone-700 mb-1">肩宽 (尺) *</label>
                 <input
                   type="number"
-                  step="0.5"
+                  step="0.01"
+                  placeholder="如: 1.40"
                   value={shoulder}
                   onChange={e => setShoulder(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-sm border border-stone-300 rounded-lg focus:ring-1 focus:ring-stone-800 text-center font-medium text-amber-900 bg-amber-50/50"
+                  className="w-full px-2.5 py-1.5 text-sm border border-stone-300 rounded-lg focus:ring-1 focus:ring-stone-800 text-center font-bold text-amber-900 bg-amber-50/50"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">净胸围 (cm)</label>
+                <label className="block text-xs font-medium text-stone-700 mb-1">净胸围 (尺) *</label>
                 <input
                   type="number"
-                  step="0.5"
+                  step="0.01"
+                  placeholder="如: 3.03"
                   value={chest}
                   onChange={e => setChest(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-sm border border-stone-300 rounded-lg focus:ring-1 focus:ring-stone-800 text-center font-medium text-amber-900 bg-amber-50/50"
+                  className="w-full px-2.5 py-1.5 text-sm border border-stone-300 rounded-lg focus:ring-1 focus:ring-stone-800 text-center font-bold text-amber-900 bg-amber-50/50"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">腰围 (cm)</label>
+                <label className="block text-xs font-medium text-stone-700 mb-1">腰围 (尺) *</label>
                 <input
                   type="number"
-                  step="0.5"
+                  step="0.01"
+                  placeholder="如: 2.58"
                   value={waist}
                   onChange={e => setWaist(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-sm border border-stone-300 rounded-lg focus:ring-1 focus:ring-stone-800 text-center font-medium text-amber-900 bg-amber-50/50"
+                  className="w-full px-2.5 py-1.5 text-sm border border-stone-300 rounded-lg focus:ring-1 focus:ring-stone-800 text-center font-bold text-amber-900 bg-amber-50/50"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">臀围 (cm)</label>
+                <label className="block text-xs font-medium text-stone-600 mb-1">臀围 (尺)</label>
                 <input
                   type="number"
-                  step="0.5"
+                  step="0.01"
+                  placeholder="如: 2.97"
                   value={hips}
                   onChange={e => setHips(e.target.value)}
                   className="w-full px-2.5 py-1.5 text-sm border border-stone-300 rounded-lg focus:ring-1 focus:ring-stone-800 text-center font-medium"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">袖长 (cm)</label>
+                <label className="block text-xs font-medium text-stone-600 mb-1">袖长 (尺)</label>
                 <input
                   type="number"
-                  step="0.5"
+                  step="0.01"
+                  placeholder="如: 1.85"
                   value={sleeveLength}
                   onChange={e => setSleeveLength(e.target.value)}
                   className="w-full px-2.5 py-1.5 text-sm border border-stone-300 rounded-lg focus:ring-1 focus:ring-stone-800 text-center font-medium"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">衣长 (cm)</label>
+                <label className="block text-xs font-medium text-stone-600 mb-1">衣长 (尺)</label>
                 <input
                   type="number"
-                  step="0.5"
+                  step="0.01"
+                  placeholder="如: 2.24"
                   value={clothLength}
                   onChange={e => setClothLength(e.target.value)}
                   className="w-full px-2.5 py-1.5 text-sm border border-stone-300 rounded-lg focus:ring-1 focus:ring-stone-800 text-center font-medium"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">上臂围 (cm)</label>
+                <label className="block text-xs font-medium text-stone-600 mb-1">上臂围 (尺)</label>
                 <input
                   type="number"
-                  step="0.5"
+                  step="0.01"
+                  placeholder="如: 1.01"
                   value={upperArm}
                   onChange={e => setUpperArm(e.target.value)}
                   className="w-full px-2.5 py-1.5 text-sm border border-stone-300 rounded-lg focus:ring-1 focus:ring-stone-800 text-center font-medium"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">手腕围 (cm)</label>
+                <label className="block text-xs font-medium text-stone-600 mb-1">手腕围 (尺)</label>
                 <input
                   type="number"
-                  step="0.5"
+                  step="0.01"
+                  placeholder="如: 0.53"
                   value={wrist}
                   onChange={e => setWrist(e.target.value)}
                   className="w-full px-2.5 py-1.5 text-sm border border-stone-300 rounded-lg focus:ring-1 focus:ring-stone-800 text-center font-medium"

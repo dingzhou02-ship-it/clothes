@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { LayoutDashboard, Users, ShoppingBag, Layers, Menu } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Sidebar, NavItemKey } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
@@ -348,6 +349,23 @@ function MainApp() {
     setCustomerImages(prev => [created, ...prev]);
   };
 
+  const handleDeleteCustomerFile = async (fileId: string) => {
+    if (!window.confirm('确定要删除此份历史档案吗？此操作不可恢复。')) return;
+    await storeService.deleteCustomerFile(fileId);
+    setCustomerFiles(prev => prev.filter(f => f.id !== fileId));
+  };
+
+  const handleDeleteCustomerImage = async (imageId: string) => {
+    if (!window.confirm('确定要删除此张照片吗？')) return;
+    await storeService.deleteCustomerImage(imageId);
+    setCustomerImages(prev => prev.filter(i => i.id !== imageId));
+  };
+
+  const handleUpdateMaterial = async (id: string, updates: Partial<Material>) => {
+    const updated = await storeService.updateMaterial(id, updates);
+    setMaterials(prev => prev.map(m => (m.id === updated.id ? updated : m)));
+  };
+
   const handleUpdateSettings = async (newSettings: Partial<StoreSetting>) => {
     const updated = await storeService.updateSettings(newSettings);
     setSettings(updated);
@@ -373,9 +391,21 @@ function MainApp() {
   const lowStockCount = materials.filter(m => m.stockQuantity <= m.safetyStock).length;
 
   return (
-    <div className="flex h-screen bg-stone-100 font-sans text-stone-900 overflow-hidden">
-      {/* Fixed Sidebar (Section 4) */}
-      <div className={`${isMobileSidebarOpen ? 'block fixed inset-0 z-40' : 'hidden lg:flex'}`}>
+    <div className="flex h-screen bg-stone-100 font-sans text-stone-900 overflow-hidden relative">
+      {/* Mobile Drawer Overlay */}
+      {isMobileSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 lg:hidden transition-opacity cursor-pointer"
+          onClick={() => setIsMobileSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar (Responsive drawer on mobile, static on desktop) */}
+      <div
+        className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-auto lg:flex ${
+          isMobileSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'
+        }`}
+      >
         <Sidebar
           currentNav={currentNav}
           onSelectNav={key => {
@@ -422,7 +452,7 @@ function MainApp() {
         />
 
         {/* Viewport View Switcher */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-stone-100/90">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-6 lg:p-8 bg-stone-100/90 pb-24 lg:pb-8">
           {/* Customer Detail View has top priority if a customer is selected */}
           {selectedCustomer ? (
             <CustomerDetailView
@@ -472,6 +502,8 @@ function MainApp() {
               }}
               onSetCurrentMeasurement={handleSetCurrentMeasurement}
               onAddImage={handleAddImage}
+              onDeleteFile={handleDeleteCustomerFile}
+              onDeleteImage={handleDeleteCustomerImage}
             />
           ) : (
             <>
@@ -564,6 +596,7 @@ function MainApp() {
                     setInventoryTargetMaterial(m || null);
                     setIsInventoryModalOpen(true);
                   }}
+                  onUpdateMaterial={handleUpdateMaterial}
                 />
               )}
 
@@ -752,6 +785,72 @@ function MainApp() {
           setStyles(prev => [created, ...prev]);
         }}
       />
+
+      {/* Mobile Quick Bottom Navigation Bar for iPhone / iPad */}
+      <nav
+        aria-label="移动端快速导航"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-stone-950/95 backdrop-blur-md border-t border-stone-800 flex items-center justify-around px-2 py-1.5 pb-safe text-stone-400 select-none shadow-lg"
+      >
+        <button
+          onClick={() => {
+            setCurrentNav('workbench');
+            setSelectedCustomer(null);
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-lg text-[10px] min-w-[54px] cursor-pointer transition-colors ${
+            currentNav === 'workbench' && !selectedCustomer ? 'text-amber-400 font-bold' : 'hover:text-white'
+          }`}
+        >
+          <LayoutDashboard className="w-5 h-5 mb-0.5" />
+          <span>工作台</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setCurrentNav('customers');
+            setSelectedCustomer(null);
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-lg text-[10px] min-w-[54px] cursor-pointer transition-colors ${
+            currentNav === 'customers' || selectedCustomer ? 'text-amber-400 font-bold' : 'hover:text-white'
+          }`}
+        >
+          <Users className="w-5 h-5 mb-0.5" />
+          <span>客户</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setCurrentNav('orders');
+            setSelectedCustomer(null);
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-lg text-[10px] min-w-[54px] cursor-pointer transition-colors ${
+            currentNav === 'orders' ? 'text-amber-400 font-bold' : 'hover:text-white'
+          }`}
+        >
+          <ShoppingBag className="w-5 h-5 mb-0.5" />
+          <span>订单</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setCurrentNav('materials');
+            setSelectedCustomer(null);
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-lg text-[10px] min-w-[54px] cursor-pointer transition-colors ${
+            currentNav === 'materials' ? 'text-amber-400 font-bold' : 'hover:text-white'
+          }`}
+        >
+          <Layers className="w-5 h-5 mb-0.5" />
+          <span>面料</span>
+        </button>
+
+        <button
+          onClick={() => setIsMobileSidebarOpen(true)}
+          className="flex flex-col items-center justify-center py-1 px-2 rounded-lg text-[10px] min-w-[54px] text-stone-300 hover:text-white cursor-pointer transition-colors"
+        >
+          <Menu className="w-5 h-5 mb-0.5 text-amber-500" />
+          <span>更多菜单</span>
+        </button>
+      </nav>
     </div>
   );
 }

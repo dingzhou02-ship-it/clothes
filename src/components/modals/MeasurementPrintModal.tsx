@@ -64,6 +64,7 @@ export const MeasurementPrintModal: React.FC<MeasurementPrintModalProps> = ({
               <span>档案编号：<strong>{customer.customerId}</strong></span>
               <span>量体单号：<strong>{measurement.measurementId}</strong></span>
               <span>量体日期：<strong>{formatDate(measurement.measureDate)}</strong></span>
+              <span>量体基准单位：<strong className="text-amber-900">{measurement.unit || '尺'}</strong></span>
               <span>主裁师傅：<strong>{measurement.operatorName}</strong></span>
             </div>
           </div>
@@ -80,43 +81,48 @@ export const MeasurementPrintModal: React.FC<MeasurementPrintModalProps> = ({
           </div>
 
           {/* Core Measurement Table */}
-          <div className="mb-6">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-stone-700 mb-2 border-l-3 border-amber-600 pl-2">
-              基础净体尺寸 (Standard Measurements)
-            </h2>
-            <table className="w-full text-xs border-collapse border border-stone-300">
-              <tbody>
-                <tr className="bg-stone-100 text-stone-700 font-semibold text-center">
-                  <td className="border border-stone-300 py-1.5">身高 (Height)</td>
-                  <td className="border border-stone-300 py-1.5">体重 (Weight)</td>
-                  <td className="border border-stone-300 py-1.5">肩宽 (Shoulder)</td>
-                  <td className="border border-stone-300 py-1.5">净胸围 (Chest)</td>
-                  <td className="border border-stone-300 py-1.5">净腰围 (Waist)</td>
-                </tr>
-                <tr className="text-center font-bold text-sm">
-                  <td className="border border-stone-300 py-2">{measurement.height || '-'} cm</td>
-                  <td className="border border-stone-300 py-2">{measurement.weight || '-'} kg</td>
-                  <td className="border border-stone-300 py-2 text-amber-900 bg-amber-50/30">{measurement.shoulder || '-'} cm</td>
-                  <td className="border border-stone-300 py-2 text-amber-900 bg-amber-50/30">{measurement.chest || '-'} cm</td>
-                  <td className="border border-stone-300 py-2 text-amber-900 bg-amber-50/30">{measurement.waist || '-'} cm</td>
-                </tr>
-                <tr className="bg-stone-100 text-stone-700 font-semibold text-center">
-                  <td className="border border-stone-300 py-1.5">臀围 (Hips)</td>
-                  <td className="border border-stone-300 py-1.5">袖长 (Sleeve)</td>
-                  <td className="border border-stone-300 py-1.5">衣长 (Cloth)</td>
-                  <td className="border border-stone-300 py-1.5">上臂围 (Arm)</td>
-                  <td className="border border-stone-300 py-1.5">手腕围 (Wrist)</td>
-                </tr>
-                <tr className="text-center font-bold text-sm">
-                  <td className="border border-stone-300 py-2">{measurement.hips || '-'} cm</td>
-                  <td className="border border-stone-300 py-2">{measurement.sleeveLength || '-'} cm</td>
-                  <td className="border border-stone-300 py-2">{measurement.clothLength || '-'} cm</td>
-                  <td className="border border-stone-300 py-2">{measurement.upperArm || '-'} cm</td>
-                  <td className="border border-stone-300 py-2">{measurement.wrist || '-'} cm</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          {(() => {
+            const bodyUnit = measurement.unit || '尺';
+            return (
+              <div className="mb-6">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-stone-700 mb-2 border-l-3 border-amber-600 pl-2">
+                  基础净体尺寸 (基准单位: {bodyUnit})
+                </h2>
+                <table className="w-full text-xs border-collapse border border-stone-300">
+                  <tbody>
+                    <tr className="bg-stone-100 text-stone-700 font-semibold text-center">
+                      <td className="border border-stone-300 py-1.5">身高 (Height)</td>
+                      <td className="border border-stone-300 py-1.5">体重 (Weight)</td>
+                      <td className="border border-stone-300 py-1.5">肩宽 (Shoulder)</td>
+                      <td className="border border-stone-300 py-1.5">净胸围 (Chest)</td>
+                      <td className="border border-stone-300 py-1.5">净腰围 (Waist)</td>
+                    </tr>
+                    <tr className="text-center font-bold text-sm">
+                      <td className="border border-stone-300 py-2">{measurement.height || '-'} cm</td>
+                      <td className="border border-stone-300 py-2">{measurement.weight || '-'} kg</td>
+                      <td className="border border-stone-300 py-2 text-amber-900 bg-amber-50/30">{measurement.shoulder ? `${measurement.shoulder} ${bodyUnit}` : '-'}</td>
+                      <td className="border border-stone-300 py-2 text-amber-900 bg-amber-50/30">{measurement.chest ? `${measurement.chest} ${bodyUnit}` : '-'}</td>
+                      <td className="border border-stone-300 py-2 text-amber-900 bg-amber-50/30">{measurement.waist ? `${measurement.waist} ${bodyUnit}` : '-'}</td>
+                    </tr>
+                    <tr className="bg-stone-100 text-stone-700 font-semibold text-center">
+                      <td className="border border-stone-300 py-1.5">臀围 (Hips)</td>
+                      <td className="border border-stone-300 py-1.5">袖长 (Sleeve)</td>
+                      <td className="border border-stone-300 py-1.5">衣长 (Cloth)</td>
+                      <td className="border border-stone-300 py-1.5">上臂围 (Arm)</td>
+                      <td className="border border-stone-300 py-1.5">手腕围 (Wrist)</td>
+                    </tr>
+                    <tr className="text-center font-bold text-sm">
+                      <td className="border border-stone-300 py-2">{measurement.hips ? `${measurement.hips} ${bodyUnit}` : '-'}</td>
+                      <td className="border border-stone-300 py-2">{measurement.sleeveLength ? `${measurement.sleeveLength} ${bodyUnit}` : '-'}</td>
+                      <td className="border border-stone-300 py-2">{measurement.clothLength ? `${measurement.clothLength} ${bodyUnit}` : '-'}</td>
+                      <td className="border border-stone-300 py-2">{measurement.upperArm ? `${measurement.upperArm} ${bodyUnit}` : '-'}</td>
+                      <td className="border border-stone-300 py-2">{measurement.wrist ? `${measurement.wrist} ${bodyUnit}` : '-'}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
 
           {/* Custom measurements */}
           {measurement.customItems && measurement.customItems.length > 0 && (

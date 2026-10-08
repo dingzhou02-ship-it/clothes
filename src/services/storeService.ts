@@ -5,6 +5,7 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   query,
   where,
   orderBy,
@@ -70,7 +71,12 @@ class StoreService {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed.customers?.length) this.inMemoryCustomers = parsed.customers;
-        if (parsed.measurements?.length) this.inMemoryMeasurements = parsed.measurements;
+        if (parsed.measurements?.length) {
+          this.inMemoryMeasurements = parsed.measurements.map((m: any) => ({
+            ...m,
+            unit: m.unit || '尺',
+          }));
+        }
         if (parsed.materials?.length) this.inMemoryMaterials = parsed.materials;
         if (parsed.orders?.length) this.inMemoryOrders = parsed.orders;
         if (parsed.styles?.length) this.inMemoryStyles = parsed.styles;
@@ -319,6 +325,7 @@ class StoreService {
     const id = `M-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
     const newMeasurement: Measurement = {
       ...data,
+      unit: data.unit || '尺',
       id,
       measurementId: id,
       createdAt: new Date().toISOString(),
@@ -424,6 +431,30 @@ class StoreService {
       // local updated
     }
     return newMaterial;
+  }
+
+  public async updateMaterial(id: string, updates: Partial<Material>): Promise<Material> {
+    const idx = this.inMemoryMaterials.findIndex(m => m.id === id);
+    if (idx === -1) throw new Error('面料档案不存在');
+
+    const updated: Material = {
+      ...this.inMemoryMaterials[idx],
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+    this.inMemoryMaterials[idx] = updated;
+    this.saveToLocalStorage();
+
+    try {
+      await updateDoc(doc(db, 'materials', id), {
+        ...updates,
+        updatedAt: updated.updatedAt,
+      });
+      await this.addAuditLog('更新面料信息', 'materials', id, `更新面料 ${updated.name} 的档案资料或花色图集`);
+    } catch (e) {
+      // local updated
+    }
+    return updated;
   }
 
   public async getInventoryTransactions(materialId?: string): Promise<InventoryTransaction[]> {
@@ -1030,6 +1061,21 @@ class StoreService {
     return newFile;
   }
 
+  public async deleteCustomerFile(fileId: string): Promise<void> {
+    const target = this.inMemoryFiles.find(f => f.id === fileId);
+    this.inMemoryFiles = this.inMemoryFiles.filter(f => f.id !== fileId);
+    this.saveToLocalStorage();
+
+    try {
+      await deleteDoc(doc(db, 'customerFiles', fileId));
+      if (target) {
+        await this.addAuditLog('删除历史档案扫描件', 'customerFiles', fileId, `删除了客户 ${target.customerId} 的档案: ${target.fileName}`);
+      }
+    } catch (e) {
+      // local updated
+    }
+  }
+
   // --- Customer Images ---
   public async getCustomerImages(customerId: string): Promise<CustomerImage[]> {
     try {
@@ -1064,6 +1110,21 @@ class StoreService {
       // fallback
     }
     return newImg;
+  }
+
+  public async deleteCustomerImage(imageId: string): Promise<void> {
+    const target = this.inMemoryImages.find(i => i.id === imageId);
+    this.inMemoryImages = this.inMemoryImages.filter(i => i.id !== imageId);
+    this.saveToLocalStorage();
+
+    try {
+      await deleteDoc(doc(db, 'customerImages', imageId));
+      if (target) {
+        await this.addAuditLog('删除客户照片', 'customerImages', imageId, `删除了客户 ${target.customerId} 的照片 (${target.title})`);
+      }
+    } catch (e) {
+      // local updated
+    }
   }
 
   // Reset to initial seed data

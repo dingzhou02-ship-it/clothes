@@ -118,14 +118,14 @@ service cloud.firestore {
       allow read: if isStaff();
       allow create: if isStaff() && isValidId(fileId);
       allow update: if isStaff() && isValidId(fileId);
-      allow delete: if isAdmin();
+      allow delete: if isStaff();
     }
 
     match /customerImages/{imageId} {
       allow read: if isStaff();
       allow create: if isStaff() && isValidId(imageId);
       allow update: if isStaff() && isValidId(imageId);
-      allow delete: if isAdmin();
+      allow delete: if isStaff();
     }
 
     // Settings

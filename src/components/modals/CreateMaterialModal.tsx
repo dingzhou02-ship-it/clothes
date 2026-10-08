@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { X, Layers, AlertCircle } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { X, Layers, AlertCircle, Upload, Image as ImageIcon, Loader2, Trash2 } from 'lucide-react';
 import { Material } from '../../types';
+import { storageService } from '../../services/storageService';
 
 interface CreateMaterialModalProps {
   isOpen: boolean;
@@ -26,12 +27,33 @@ export const CreateMaterialModal: React.FC<CreateMaterialModalProps> = ({
   const [stockQuantity, setStockQuantity] = useState<number>(25.0);
   const [safetyStock, setSafetyStock] = useState<number>(6.0);
   const [location, setLocation] = useState('A区-01架');
-  const [imageUrl, setImageUrl] = useState('');
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [remarks, setRemarks] = useState('');
   const [loading, setLoading] = useState(false);
+  const [uploadingImg, setUploadingImg] = useState(false);
   const [error, setError] = useState('');
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
+
+  const handleImageUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    try {
+      setUploadingImg(true);
+      setError('');
+      const uploaded: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const res = await storageService.uploadFile(files[i], 'materials');
+        uploaded.push(res.url);
+      }
+      setImageUrls(prev => [...prev, ...uploaded]);
+    } catch (err: any) {
+      setError(err?.message || '图片上传失败');
+    } finally {
+      setUploadingImg(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const allCategories = ['西服', '衬衫', '大衣', '中式服装', '女装', '裤装', '其他'];
 
@@ -69,7 +91,7 @@ export const CreateMaterialModal: React.FC<CreateMaterialModalProps> = ({
         stockQuantity: Number(stockQuantity),
         safetyStock: Number(safetyStock),
         location: location.trim(),
-        imageUrls: imageUrl ? [imageUrl.trim()] : [],
+        imageUrls: imageUrls,
         remarks: remarks.trim(),
       });
       onClose();
@@ -232,14 +254,56 @@ export const CreateMaterialModal: React.FC<CreateMaterialModalProps> = ({
             </div>
 
             <div className="md:col-span-2">
-              <label className="block text-stone-700 font-medium mb-1">面料图片 URL</label>
+              <label className="block text-stone-700 font-medium mb-1">面料实物照片 (支持从本地文件夹上传多张)</label>
+              
               <input
-                type="url"
-                placeholder="https://..."
-                value={imageUrl}
-                onChange={e => setImageUrl(e.target.value)}
-                className="w-full px-3 py-2 border border-stone-300 rounded-lg"
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                onChange={e => handleImageUpload(e.target.files)}
+                className="hidden"
               />
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingImg}
+                  className="px-3 py-2 bg-stone-100 hover:bg-stone-200 border border-stone-300 rounded-xl text-xs font-semibold text-stone-800 flex items-center space-x-1.5 cursor-pointer transition-colors"
+                >
+                  {uploadingImg ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+                  ) : (
+                    <Upload className="w-4 h-4 text-amber-600" />
+                  )}
+                  <span>{uploadingImg ? '照片上传中...' : '从本地文件夹选择图片'}</span>
+                </button>
+                <span className="text-[11px] text-stone-400">支持 JPG, JPEG, PNG, WEBP 高清实物拍摄图</span>
+              </div>
+
+              {imageUrls.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-3 p-2 bg-stone-50 rounded-xl border border-stone-200">
+                  {imageUrls.map((url, idx) => (
+                    <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-stone-300 group">
+                      <img src={url} alt={`面料图片 ${idx + 1}`} className="w-full h-full object-cover" />
+                      {idx === 0 && (
+                        <span className="absolute bottom-0 inset-x-0 bg-stone-900/80 text-white text-[9px] text-center font-bold">
+                          主图
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setImageUrls(prev => prev.filter((_, i) => i !== idx))}
+                        className="absolute top-1 right-1 p-0.5 bg-black/70 hover:bg-rose-600 text-white rounded-md transition-colors"
+                        title="删除该张图片"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="md:col-span-2">

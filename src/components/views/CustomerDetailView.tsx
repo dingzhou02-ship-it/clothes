@@ -19,15 +19,11 @@ import {
   Edit2,
   Trash2,
   X,
+  Upload,
+  Loader2,
 } from 'lucide-react';
-import {
-  Customer,
-  Measurement,
-  Order,
-  WalletTransaction,
-  CustomerFile,
-  CustomerImage,
-} from '../../types';
+import { CustomerFile, CustomerImage, Customer, Measurement, Order, WalletTransaction } from '../../types';
+import { storageService } from '../../services/storageService';
 import {
   formatMoney,
   formatDate,
@@ -56,6 +52,8 @@ interface CustomerDetailViewProps {
   onOpenPdfPreview: (file: CustomerFile) => void;
   onSetCurrentMeasurement: (measurementId: string) => Promise<void>;
   onAddImage: (customerId: string, imageType: any, imageUrl: string, title: string, remarks: string) => Promise<void>;
+  onDeleteFile?: (fileId: string) => Promise<void>;
+  onDeleteImage?: (imageId: string) => Promise<void>;
 }
 
 export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
@@ -77,6 +75,8 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
   onOpenPdfPreview,
   onSetCurrentMeasurement,
   onAddImage,
+  onDeleteFile,
+  onDeleteImage,
 }) => {
   const [activeTab, setActiveTab] = useState<
     'basic' | 'measurements' | 'orders' | 'wallet' | 'archives' | 'images'
@@ -424,32 +424,45 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
                   </div>
 
                   {/* Body sizes table */}
-                  <div className="grid grid-cols-2 sm:grid-cols-5 md:grid-cols-10 gap-2 text-center text-xs">
-                    {[
-                      { label: '身高', val: m.height, unit: 'cm' },
-                      { label: '体重', val: m.weight, unit: 'kg' },
-                      { label: '肩宽', val: m.shoulder, unit: 'cm', highlight: true },
-                      { label: '净胸围', val: m.chest, unit: 'cm', highlight: true },
-                      { label: '腰围', val: m.waist, unit: 'cm', highlight: true },
-                      { label: '臀围', val: m.hips, unit: 'cm' },
-                      { label: '袖长', val: m.sleeveLength, unit: 'cm' },
-                      { label: '衣长', val: m.clothLength, unit: 'cm' },
-                      { label: '上臂围', val: m.upperArm, unit: 'cm' },
-                      { label: '手腕围', val: m.wrist, unit: 'cm' },
-                    ].map((item, i) => (
-                      <div
-                        key={i}
-                        className={`p-2 rounded-lg border ${
-                          item.highlight ? 'bg-amber-50/60 border-amber-200 text-amber-950 font-bold' : 'bg-stone-50 border-stone-200 text-stone-800'
-                        }`}
-                      >
-                        <div className="text-[10px] text-stone-400">{item.label}</div>
-                        <div className="text-xs font-mono font-bold mt-0.5">
-                          {item.val ? `${item.val} ${item.unit}` : '-'}
+                  {(() => {
+                    const bodyUnit = m.unit || '尺';
+                    return (
+                      <div className="space-y-2">
+                        <div className="flex items-center space-x-2 text-[11px]">
+                          <span className="font-bold bg-amber-50 text-amber-900 border border-amber-200 px-2 py-0.5 rounded-md">
+                            本次量体基准单位：{bodyUnit}
+                          </span>
+                          <span className="text-stone-400">（历史记录已保留当时单位，支持两位小数精密放量）</span>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-5 md:grid-cols-10 gap-2 text-center text-xs">
+                          {[
+                            { label: '身高', val: m.height, unit: 'cm' },
+                            { label: '体重', val: m.weight, unit: 'kg' },
+                            { label: '肩宽', val: m.shoulder, unit: bodyUnit, highlight: true },
+                            { label: '净胸围', val: m.chest, unit: bodyUnit, highlight: true },
+                            { label: '腰围', val: m.waist, unit: bodyUnit, highlight: true },
+                            { label: '臀围', val: m.hips, unit: bodyUnit },
+                            { label: '袖长', val: m.sleeveLength, unit: bodyUnit },
+                            { label: '衣长', val: m.clothLength, unit: bodyUnit },
+                            { label: '上臂围', val: m.upperArm, unit: bodyUnit },
+                            { label: '手腕围', val: m.wrist, unit: bodyUnit },
+                          ].map((item, i) => (
+                            <div
+                              key={i}
+                              className={`p-2 rounded-lg border ${
+                                item.highlight ? 'bg-amber-50/60 border-amber-200 text-amber-950 font-bold' : 'bg-stone-50 border-stone-200 text-stone-800'
+                              }`}
+                            >
+                              <div className="text-[10px] text-stone-400">{item.label}</div>
+                              <div className="text-xs font-mono font-bold mt-0.5">
+                                {item.val ? `${item.val} ${item.unit}` : '-'}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })()}
 
                   {/* Custom Measurement items */}
                   {m.customItems && m.customItems.length > 0 && (
@@ -457,7 +470,7 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
                       <span className="text-[11px] text-stone-400 self-center">特殊部位尺寸：</span>
                       {m.customItems.map((ci, idx2) => (
                         <span key={idx2} className="px-2 py-0.5 bg-stone-100 text-stone-800 rounded-md text-xs border border-stone-200">
-                          {ci.name}: <strong>{ci.value}{ci.unit || 'cm'}</strong> {ci.remark && `(${ci.remark})`}
+                          {ci.name}: <strong>{ci.value}{ci.unit || '尺'}</strong> {ci.remark && `(${ci.remark})`}
                         </span>
                       ))}
                     </div>
@@ -681,54 +694,80 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredFiles.map(file => (
-                <div
-                  key={file.id}
-                  className="bg-white rounded-xl border border-stone-200 p-4 hover:border-stone-400 transition-colors shadow-xs space-y-3"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center space-x-2.5">
-                      <div className="p-2 bg-rose-50 text-rose-700 rounded-lg">
-                        <FileText className="w-5 h-5" />
+              {filteredFiles.map(file => {
+                const lowerName = file.fileName.toLowerCase();
+                const isImg =
+                  lowerName.endsWith('.jpg') ||
+                  lowerName.endsWith('.jpeg') ||
+                  lowerName.endsWith('.png') ||
+                  lowerName.endsWith('.webp') ||
+                  file.fileUrl.startsWith('data:image/');
+                const formatArchiveSize = (bytes?: number) => {
+                  if (!bytes) return '未知大小';
+                  if (bytes < 1024) return `${bytes} B`;
+                  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+                  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+                };
+
+                return (
+                  <div
+                    key={file.id}
+                    className="bg-white rounded-xl border border-stone-200 p-4 hover:border-stone-400 transition-colors shadow-xs space-y-3"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center space-x-2.5 min-w-0">
+                        <div className={`p-2 rounded-lg shrink-0 ${isImg ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
+                          {isImg ? <ImageIcon className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-bold text-stone-900 truncate">{file.fileName}</h4>
+                          <p className="text-[11px] text-stone-400">
+                            {file.year}年度 · {file.fileType === 'historical_order' ? '历史纸质订单' : file.fileType === 'historical_measurement' ? '历史手写量体单' : '客户档案文件'} ({isImg ? '照片' : 'PDF文档'}) · {formatArchiveSize(file.fileSize)}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="text-xs font-bold text-stone-900">{file.fileName}</h4>
-                        <p className="text-[11px] text-stone-400">
-                          {file.year}年度 · {file.fileType === 'historical_order' ? '纸质订单存根' : '手写量体单'} · {(file.fileSize / 1024 / 1024).toFixed(1)} MB
-                        </p>
+                    </div>
+
+                    {file.remarks && (
+                      <p className="text-xs text-stone-600 bg-stone-50 p-2 rounded-lg">
+                        {file.remarks}
+                      </p>
+                    )}
+
+                    <div className="flex items-center justify-between pt-2 border-t border-stone-100 text-xs">
+                      <span className="text-stone-400 text-[11px]">{formatDate(file.createdAt)}</span>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => onOpenPdfPreview(file)}
+                          className="px-2.5 py-1 text-xs bg-stone-900 hover:bg-stone-800 text-white rounded-md flex items-center space-x-1 cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>在线查看</span>
+                        </button>
+                        <a
+                          href={file.fileUrl}
+                          download={file.fileName}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2.5 py-1 text-xs bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-md flex items-center space-x-1 cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>下载</span>
+                        </a>
+                        {onDeleteFile && (
+                          <button
+                            onClick={() => onDeleteFile(file.id)}
+                            className="p-1 text-stone-400 hover:text-rose-600 rounded-md cursor-pointer transition-colors"
+                            title="删除该份归档"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
-
-                  {file.remarks && (
-                    <p className="text-xs text-stone-600 bg-stone-50 p-2 rounded-lg">
-                      {file.remarks}
-                    </p>
-                  )}
-
-                  <div className="flex items-center justify-between pt-2 border-t border-stone-100 text-xs">
-                    <span className="text-stone-400">{formatDate(file.createdAt)}</span>
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => onOpenPdfPreview(file)}
-                        className="px-2.5 py-1 text-xs bg-stone-900 hover:bg-stone-800 text-white rounded-md flex items-center space-x-1 cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>在线查看</span>
-                      </button>
-                      <a
-                        href={file.fileUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-2.5 py-1 text-xs bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-md flex items-center space-x-1 cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>下载</span>
-                      </a>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -769,10 +808,21 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
                       {img.imageType === 'front' ? '正面' : img.imageType === 'side' ? '侧面' : img.imageType === 'back' ? '背面' : '成衣实拍'}
                     </span>
                   </div>
-                  <div className="p-3">
-                    <h4 className="text-xs font-bold text-stone-900">{img.title}</h4>
-                    {img.remarks && <p className="text-[11px] text-stone-500 mt-0.5">{img.remarks}</p>}
-                    <span className="text-[10px] text-stone-400 block mt-1">{formatDate(img.createdAt)}</span>
+                  <div className="p-3 flex items-start justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold text-stone-900">{img.title}</h4>
+                      {img.remarks && <p className="text-[11px] text-stone-500 mt-0.5">{img.remarks}</p>}
+                      <span className="text-[10px] text-stone-400 block mt-1">{formatDate(img.createdAt)}</span>
+                    </div>
+                    {onDeleteImage && (
+                      <button
+                        onClick={() => onDeleteImage(img.id)}
+                        className="p-1 text-stone-400 hover:text-rose-600 rounded-lg cursor-pointer transition-colors"
+                        title="删除该照片"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -781,17 +831,58 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
 
           {/* Add Image Modal */}
           {showAddImageModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-              <div className="bg-white rounded-xl p-6 w-full max-w-md space-y-4">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+              <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl border border-stone-200">
                 <div className="flex justify-between items-center">
-                  <h4 className="text-sm font-bold text-stone-900">上传客户照片</h4>
-                  <button onClick={() => setShowAddImageModal(false)} className="text-stone-400 hover:text-stone-600">
+                  <h4 className="text-sm font-bold text-stone-900">上传客户照片 (支持本地相册/拍照)</h4>
+                  <button onClick={() => setShowAddImageModal(false)} className="text-stone-400 hover:text-stone-600 p-1">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
                 <form onSubmit={handleImageSubmit} className="space-y-3">
                   <div>
-                    <label className="block text-xs text-stone-600 mb-1">图片类型</label>
+                    <label className="block text-xs font-medium text-stone-700 mb-1">选择本地照片文件 *</label>
+                    <label className="flex flex-col items-center justify-center border-2 border-dashed border-stone-300 hover:border-amber-500 rounded-xl p-4 bg-stone-50 hover:bg-amber-50/30 cursor-pointer transition-colors">
+                      <input
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={async e => {
+                          if (e.target.files && e.target.files[0]) {
+                            try {
+                              setImgLoading(true);
+                              const file = e.target.files[0];
+                              if (!newImgTitle) setNewImgTitle(file.name.replace(/\.[^/.]+$/, ''));
+                              const res = await storageService.uploadFile(file, 'customers');
+                              setNewImgUrl(res.url);
+                            } catch (err: any) {
+                              alert(err?.message || '照片上传失败');
+                            } finally {
+                              setImgLoading(false);
+                            }
+                          }
+                        }}
+                      />
+                      {newImgUrl ? (
+                        <div className="flex items-center space-x-3 w-full">
+                          <img src={newImgUrl} alt="预览" className="w-12 h-12 object-cover rounded-lg border border-stone-300" />
+                          <span className="text-xs text-emerald-700 font-bold flex items-center space-x-1">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>照片已选取并准备就绪</span>
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="text-center space-y-1">
+                          <Upload className="w-6 h-6 text-stone-400 mx-auto" />
+                          <p className="text-xs font-bold text-stone-700">点击从电脑本地或手机相册选择照片</p>
+                          <p className="text-[10px] text-stone-400">支持 JPG, PNG, WEBP 高清实拍图</p>
+                        </div>
+                      )}
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-stone-600 mb-1">图片分类标签</label>
                     <select
                       value={newImgType}
                       onChange={e => setNewImgType(e.target.value as any)}
@@ -804,19 +895,9 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
                       <option value="other">其他特写</option>
                     </select>
                   </div>
+
                   <div>
-                    <label className="block text-xs text-stone-600 mb-1">照片地址 URL / 上传地址</label>
-                    <input
-                      type="url"
-                      required
-                      placeholder="https://..."
-                      value={newImgUrl}
-                      onChange={e => setNewImgUrl(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded-lg"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-stone-600 mb-1">照片标题</label>
+                    <label className="block text-xs text-stone-600 mb-1">照片标题名称</label>
                     <input
                       type="text"
                       placeholder="如：2026秋季羊绒大衣试衣上身"
@@ -825,6 +906,7 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
                       className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded-lg"
                     />
                   </div>
+
                   <div>
                     <label className="block text-xs text-stone-600 mb-1">工艺试衣观察备注</label>
                     <textarea
@@ -835,20 +917,21 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
                       className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded-lg"
                     />
                   </div>
-                  <div className="flex justify-end space-x-2 pt-2">
+
+                  <div className="flex justify-end space-x-2 pt-2 border-t border-stone-100">
                     <button
                       type="button"
                       onClick={() => setShowAddImageModal(false)}
-                      className="px-3 py-1.5 text-xs bg-stone-100 rounded-lg text-stone-700"
+                      className="px-3 py-1.5 text-xs bg-stone-100 rounded-lg text-stone-700 cursor-pointer"
                     >
                       取消
                     </button>
                     <button
                       type="submit"
-                      disabled={imgLoading}
-                      className="px-4 py-1.5 text-xs bg-stone-900 text-white rounded-lg font-bold"
+                      disabled={imgLoading || !newImgUrl}
+                      className="px-4 py-1.5 text-xs bg-stone-900 text-white rounded-lg font-bold cursor-pointer disabled:opacity-50"
                     >
-                      {imgLoading ? '上传中...' : '确认上传'}
+                      {imgLoading ? '上传处理中...' : '确认保存'}
                     </button>
                   </div>
                 </form>

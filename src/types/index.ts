@@ -46,9 +46,10 @@ export interface Measurement {
   waist?: number; // cm
   hips?: number; // cm
   sleeveLength?: number; // cm
-  clothLength?: number; // cm
-  upperArm?: number; // cm
-  wrist?: number; // cm
+  clothLength?: number; // 尺
+  upperArm?: number; // 尺
+  wrist?: number; // 尺
+  unit?: string; // 量体基准单位 (默认为 '尺')
   customItems: CustomMeasurementItem[];
   remarks?: string;
   createdAt: string;

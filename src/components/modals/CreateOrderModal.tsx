@@ -507,18 +507,28 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                 </div>
 
                 <div className="flex justify-between items-center text-stone-600">
-                  <span>会员折扣规则：</span>
-                  <div className="flex items-center space-x-1">
+                  <span>会员专属折扣：</span>
+                  <div className="flex items-center space-x-1.5">
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                      currentCustomer?.level === 'svip' ? 'bg-purple-100 text-purple-900 border border-purple-200' :
+                      currentCustomer?.level === 'vip' ? 'bg-amber-100 text-amber-900 border border-amber-200' :
+                      'bg-stone-100 text-stone-600'
+                    }`}>
+                      {currentCustomer?.level === 'svip' ? 'SVIP尊享' : currentCustomer?.level === 'vip' ? 'VIP客户' : '普通客户'}
+                    </span>
                     <input
                       type="number"
-                      step="0.01"
-                      min="0.5"
-                      max="1.0"
-                      value={customDiscountRate}
-                      onChange={e => setCustomDiscountRate(Number(e.target.value))}
+                      step="0.1"
+                      min="5.0"
+                      max="10.0"
+                      value={(customDiscountRate * 10).toFixed(1)}
+                      onChange={e => {
+                        const val = Number(e.target.value);
+                        if (val > 0) setCustomDiscountRate(Number((val / 10).toFixed(3)));
+                      }}
                       className="w-16 px-1.5 py-0.5 text-xs border border-stone-300 rounded-md text-center font-bold"
                     />
-                    <span className="text-stone-400">({(customDiscountRate * 10).toFixed(1)}折)</span>
+                    <span className="text-stone-700 font-bold text-xs">折</span>
                   </div>
                 </div>
 

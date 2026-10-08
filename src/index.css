@@ -1,1 +1,20 @@
 @import "tailwindcss";
+
+/* iOS Safari mobile optimization */
+@layer base {
+  @media screen and (max-width: 768px) {
+    input, select, textarea {
+      font-size: 16px !important; /* Prevents iOS Safari from zooming in on focus */
+    }
+  }
+
+  html, body {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    overscroll-behavior-y: none;
+  }
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 16px);
+}

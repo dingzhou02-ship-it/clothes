@@ -110,30 +110,42 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
               </div>
 
               {/* Sizing Grid */}
-              <div className="grid grid-cols-3 sm:grid-cols-6 md:grid-cols-10 gap-2 text-center text-xs pt-3">
-                {[
-                  { label: '身高', val: m.height, unit: 'cm' },
-                  { label: '体重', val: m.weight, unit: 'kg' },
-                  { label: '肩宽', val: m.shoulder, unit: 'cm', hl: true },
-                  { label: '胸围', val: m.chest, unit: 'cm', hl: true },
-                  { label: '腰围', val: m.waist, unit: 'cm', hl: true },
-                  { label: '臀围', val: m.hips, unit: 'cm' },
-                  { label: '袖长', val: m.sleeveLength, unit: 'cm' },
-                  { label: '衣长', val: m.clothLength, unit: 'cm' },
-                  { label: '上臂围', val: m.upperArm, unit: 'cm' },
-                  { label: '手腕围', val: m.wrist, unit: 'cm' },
-                ].map((s, idx) => (
-                  <div
-                    key={idx}
-                    className={`p-2 rounded-lg border ${
-                      s.hl ? 'bg-amber-50/60 border-amber-200 text-amber-950 font-bold' : 'bg-stone-50 border-stone-200 text-stone-800'
-                    }`}
-                  >
-                    <span className="text-[10px] text-stone-400 block">{s.label}</span>
-                    <strong className="text-xs font-mono">{s.val ? `${s.val}${s.unit}` : '-'}</strong>
+              {(() => {
+                const bodyUnit = m.unit || '尺';
+                return (
+                  <div className="space-y-1.5 pt-3">
+                    <div className="flex items-center space-x-2 text-[11px] text-stone-500">
+                      <span className="font-bold bg-amber-50 text-amber-900 border border-amber-200 px-2 py-0.5 rounded-md">
+                        本次量体基准单位：{bodyUnit}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 md:grid-cols-10 gap-2 text-center text-xs">
+                      {[
+                        { label: '身高', val: m.height, unit: 'cm' },
+                        { label: '体重', val: m.weight, unit: 'kg' },
+                        { label: '肩宽', val: m.shoulder, unit: bodyUnit, hl: true },
+                        { label: '胸围', val: m.chest, unit: bodyUnit, hl: true },
+                        { label: '腰围', val: m.waist, unit: bodyUnit, hl: true },
+                        { label: '臀围', val: m.hips, unit: bodyUnit },
+                        { label: '袖长', val: m.sleeveLength, unit: bodyUnit },
+                        { label: '衣长', val: m.clothLength, unit: bodyUnit },
+                        { label: '上臂围', val: m.upperArm, unit: bodyUnit },
+                        { label: '手腕围', val: m.wrist, unit: bodyUnit },
+                      ].map((s, idx) => (
+                        <div
+                          key={idx}
+                          className={`p-2 rounded-lg border ${
+                            s.hl ? 'bg-amber-50/60 border-amber-200 text-amber-950 font-bold' : 'bg-stone-50 border-stone-200 text-stone-800'
+                          }`}
+                        >
+                          <span className="text-[10px] text-stone-400 block">{s.label}</span>
+                          <strong className="text-xs font-mono">{s.val ? `${s.val} ${s.unit}` : '-'}</strong>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-              </div>
+                );
+              })()}
 
               {m.remarks && (
                 <p className="text-xs text-stone-500 mt-2 bg-stone-50 p-2 rounded-md">

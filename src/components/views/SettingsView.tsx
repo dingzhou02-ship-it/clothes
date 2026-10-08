@@ -192,66 +192,161 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* VIP Discount Rules (Section 14 & 26) */}
+        {/* VIP Discount Rules */}
         <div className="bg-white rounded-2xl border border-stone-200 p-5 shadow-xs space-y-4">
-          <h3 className="text-sm font-bold text-stone-900 flex items-center space-x-2 border-b border-stone-100 pb-3">
-            <Percent className="w-4 h-4 text-amber-600" />
-            <span>会员专属动态折扣策略 (不写死代码，支持灵活调整)</span>
-          </h3>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-stone-100 pb-3 gap-2">
+            <h3 className="text-sm font-bold text-stone-900 flex items-center space-x-2">
+              <Percent className="w-4 h-4 text-amber-600" />
+              <span>会员折扣设置 (VIP / SVIP 专属自定义折扣率)</span>
+            </h3>
+            <span className="text-xs text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md font-medium">
+              新订单自动采用最新设置 · 历史订单不可篡改已冻结金额
+            </span>
+          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            <div>
-              <label className="block text-stone-700 font-medium mb-1">
-                VIP 会员默认折扣比例 (如 0.95 为95折)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0.5"
-                max="1.0"
-                value={vipDiscountRate}
-                onChange={e => setVipDiscountRate(Number(e.target.value))}
-                className="w-full px-3 py-2 border border-stone-300 rounded-lg font-bold"
-              />
-              <span className="text-[11px] text-stone-400 mt-1 block">
-                实际折扣：{(vipDiscountRate * 10).toFixed(1)} 折
-              </span>
+          <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-600 space-y-1">
+            <p className="font-semibold text-stone-800">
+              💡 店铺管理员可随时按需调整会员折扣：
+            </p>
+            <p>
+              • 输入例如 <strong className="text-stone-900">9.5</strong> 代表 9.5折（减免 5%），<strong className="text-stone-900">8.8</strong> 代表 8.8折（减免 12%），<strong className="text-stone-900">8.0</strong> 代表 8折（减免 20%）。
+            </p>
+            <p className="text-[11px] text-stone-500">
+              • 已经完成的历史订单保留当时下单时的实际折扣和最终结算价格，不受后续修改影响。
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-xs">
+            {/* VIP Settings */}
+            <div className="p-4 bg-white border border-stone-200 rounded-xl space-y-3 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-stone-900 text-sm flex items-center space-x-1.5">
+                  <span className="px-2 py-0.5 bg-amber-100 text-amber-900 font-bold rounded-md text-xs">VIP</span>
+                  <span>VIP 客户专属折扣</span>
+                </span>
+                <span className="text-xs font-mono font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                  当前: {(vipDiscountRate * 10).toFixed(1)} 折
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-stone-700 font-medium mb-1">
+                  输入折扣 (例: 9.5折输入 9.5，9折输入 9，8.8折输入 8.8)
+                </label>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="5.0"
+                    max="10.0"
+                    value={(vipDiscountRate * 10).toFixed(1)}
+                    onChange={e => {
+                      const val = Number(e.target.value);
+                      if (val > 0) setVipDiscountRate(Number((val / 10).toFixed(3)));
+                    }}
+                    className="w-32 px-3 py-2 border border-stone-300 rounded-lg font-bold text-sm text-center bg-white"
+                  />
+                  <span className="text-sm font-bold text-stone-700">折</span>
+                  <span className="text-xs text-stone-400">
+                    (= 原价 × {vipDiscountRate.toFixed(2)})
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-[11px] text-stone-400 block mb-1.5">快捷预设推荐：</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[9.5, 9.2, 9.0, 8.8].map(zhe => (
+                    <button
+                      key={zhe}
+                      type="button"
+                      onClick={() => setVipDiscountRate(Number((zhe / 10).toFixed(3)))}
+                      className={`px-2.5 py-1 text-xs rounded-lg border cursor-pointer font-medium transition-colors ${
+                        (vipDiscountRate * 10).toFixed(1) === zhe.toFixed(1)
+                          ? 'bg-amber-500 text-stone-950 border-amber-600 font-bold'
+                          : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200'
+                      }`}
+                    >
+                      {zhe}折
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
-            <div>
-              <label className="block text-stone-700 font-medium mb-1">
-                SVIP 尊享会员默认折扣比例 (如 0.90 为9折)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0.5"
-                max="1.0"
-                value={svipDiscountRate}
-                onChange={e => setSvipDiscountRate(Number(e.target.value))}
-                className="w-full px-3 py-2 border border-stone-300 rounded-lg font-bold"
-              />
-              <span className="text-[11px] text-stone-400 mt-1 block">
-                实际折扣：{(svipDiscountRate * 10).toFixed(1)} 折
-              </span>
-            </div>
+            {/* SVIP Settings */}
+            <div className="p-4 bg-white border border-stone-200 rounded-xl space-y-3 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-stone-900 text-sm flex items-center space-x-1.5">
+                  <span className="px-2 py-0.5 bg-purple-100 text-purple-900 font-bold rounded-md text-xs">SVIP</span>
+                  <span>SVIP 尊享客户折扣</span>
+                </span>
+                <span className="text-xs font-mono font-bold text-purple-800 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
+                  当前: {(svipDiscountRate * 10).toFixed(1)} 折
+                </span>
+              </div>
 
-            <div>
-              <label className="block text-stone-700 font-medium mb-1">
-                面料库默认安全警戒库存 (米)
-              </label>
-              <input
-                type="number"
-                step="0.5"
-                min="1"
-                value={defaultSafetyStock}
-                onChange={e => setDefaultSafetyStock(Number(e.target.value))}
-                className="w-full px-3 py-2 border border-stone-300 rounded-lg font-bold"
-              />
-              <span className="text-[11px] text-stone-400 mt-1 block">
-                低于该米数时工作台产生红色预警
-              </span>
+              <div>
+                <label className="block text-stone-700 font-medium mb-1">
+                  输入折扣 (例: 9折输入 9，8.5折输入 8.5，8折输入 8)
+                </label>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="5.0"
+                    max="10.0"
+                    value={(svipDiscountRate * 10).toFixed(1)}
+                    onChange={e => {
+                      const val = Number(e.target.value);
+                      if (val > 0) setSvipDiscountRate(Number((val / 10).toFixed(3)));
+                    }}
+                    className="w-32 px-3 py-2 border border-stone-300 rounded-lg font-bold text-sm text-center bg-white"
+                  />
+                  <span className="text-sm font-bold text-stone-700">折</span>
+                  <span className="text-xs text-stone-400">
+                    (= 原价 × {svipDiscountRate.toFixed(2)})
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-[11px] text-stone-400 block mb-1.5">快捷预设推荐：</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[9.0, 8.8, 8.5, 8.0].map(zhe => (
+                    <button
+                      key={zhe}
+                      type="button"
+                      onClick={() => setSvipDiscountRate(Number((zhe / 10).toFixed(3)))}
+                      className={`px-2.5 py-1 text-xs rounded-lg border cursor-pointer font-medium transition-colors ${
+                        (svipDiscountRate * 10).toFixed(1) === zhe.toFixed(1)
+                          ? 'bg-purple-600 text-white border-purple-700 font-bold'
+                          : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200'
+                      }`}
+                    >
+                      {zhe}折
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
+          </div>
+
+          <div className="pt-2">
+            <label className="block text-stone-700 font-medium mb-1 text-xs">
+              面料库默认安全警戒库存 (米)
+            </label>
+            <input
+              type="number"
+              step="0.5"
+              min="1"
+              value={defaultSafetyStock}
+              onChange={e => setDefaultSafetyStock(Number(e.target.value))}
+              className="w-48 px-3 py-2 border border-stone-300 rounded-lg font-bold text-xs"
+            />
+            <span className="text-[11px] text-stone-400 mt-1 block">
+              低于该米数时工作台产生红色预警
+            </span>
           </div>
         </div>
 

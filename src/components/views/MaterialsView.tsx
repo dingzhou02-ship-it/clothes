@@ -9,15 +9,19 @@ import {
   Calendar,
   History,
   Tag,
+  Eye,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { Material, InventoryTransaction } from '../../types';
 import { formatMoney, formatDateTime } from '../../utils/formatters';
+import { MaterialDetailModal } from '../modals/MaterialDetailModal';
 
 interface MaterialsViewProps {
   materials: Material[];
   transactions: InventoryTransaction[];
   onOpenCreateMaterial: () => void;
   onOpenInventoryModal: (material?: Material) => void;
+  onUpdateMaterial: (materialId: string, updates: Partial<Material>) => Promise<void>;
 }
 
 export const MaterialsView: React.FC<MaterialsViewProps> = ({
@@ -25,10 +29,12 @@ export const MaterialsView: React.FC<MaterialsViewProps> = ({
   transactions,
   onOpenCreateMaterial,
   onOpenInventoryModal,
+  onUpdateMaterial,
 }) => {
   const [activeTab, setActiveTab] = useState<'catalog' | 'transactions'>('catalog');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [detailMaterial, setDetailMaterial] = useState<Material | null>(null);
 
   const filteredMaterials = materials.filter(m => {
     const matchSearch =
@@ -140,16 +146,21 @@ export const MaterialsView: React.FC<MaterialsViewProps> = ({
               >
                 <div>
                   {/* Fabric Photo */}
-                  <div className="h-44 bg-stone-100 overflow-hidden relative">
+                  <div
+                    onClick={() => setDetailMaterial(m)}
+                    className="h-44 bg-stone-100 overflow-hidden relative cursor-pointer group"
+                    title="点击查看高清实物大图与图集管理"
+                  >
                     {m.imageUrls && m.imageUrls[0] ? (
                       <img
                         src={m.imageUrls[0]}
                         alt={m.name}
-                        className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-stone-400 text-xs">
-                        暂无面料照片
+                      <div className="w-full h-full flex flex-col items-center justify-center text-stone-400 text-xs">
+                        <ImageIcon className="w-6 h-6 mb-1 text-stone-300" />
+                        <span>暂无面料照片 (点击上传)</span>
                       </div>
                     )}
                     <div className="absolute top-2 left-2 flex flex-wrap gap-1">
@@ -159,6 +170,12 @@ export const MaterialsView: React.FC<MaterialsViewProps> = ({
                         </span>
                       ))}
                     </div>
+                    {m.imageUrls && m.imageUrls.length > 0 && (
+                      <div className="absolute bottom-2 right-2 bg-stone-950/70 text-white text-[10px] px-2 py-0.5 rounded-md font-mono flex items-center space-x-1 backdrop-blur-xs">
+                        <ImageIcon className="w-3 h-3 text-amber-400" />
+                        <span>{m.imageUrls.length} 张图</span>
+                      </div>
+                    )}
                     {isLowStock && (
                       <div className="absolute top-2 right-2 bg-rose-600 text-white text-[10px] px-2 py-0.5 rounded-md font-bold flex items-center space-x-1 shadow-xs">
                         <AlertTriangle className="w-3 h-3" />
@@ -203,12 +220,21 @@ export const MaterialsView: React.FC<MaterialsViewProps> = ({
                     <span className="text-[10px] text-stone-400">安全线: {m.safetyStock}m · 售价: {formatMoney(m.salePrice)}/m</span>
                   </div>
 
-                  <button
-                    onClick={() => onOpenInventoryModal(m)}
-                    className="px-2.5 py-1.5 bg-stone-900 hover:bg-stone-800 text-white rounded-lg text-xs font-medium cursor-pointer transition-colors shadow-xs"
-                  >
-                    增减库存
-                  </button>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => setDetailMaterial(m)}
+                      className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+                      title="查看高清大图与管理图片"
+                    >
+                      大图/传图
+                    </button>
+                    <button
+                      onClick={() => onOpenInventoryModal(m)}
+                      className="px-2.5 py-1.5 bg-stone-900 hover:bg-stone-800 text-white rounded-lg text-xs font-medium cursor-pointer transition-colors shadow-xs"
+                    >
+                      增减库存
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -275,6 +301,17 @@ export const MaterialsView: React.FC<MaterialsViewProps> = ({
           </div>
         </div>
       )}
+      {/* Material Detail & Image Gallery Modal */}
+      <MaterialDetailModal
+        isOpen={!!detailMaterial}
+        onClose={() => setDetailMaterial(null)}
+        material={detailMaterial}
+        onUpdateMaterial={async (id, updates) => {
+          await onUpdateMaterial(id, updates);
+          setDetailMaterial(prev => (prev && prev.id === id ? { ...prev, ...updates } : prev));
+        }}
+        onOpenInventoryModal={onOpenInventoryModal}
+      />
     </div>
   );
 };
