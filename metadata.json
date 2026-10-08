@@ -1,0 +1,6 @@
+{
+  "name": "七彩布衣数字化管理系统",
+  "description": "专业服装定制店内部数字化管理系统，涵盖客户档案、多次量体记录、面料与出入库流水、款式库、订单生命周期、储值账户流水及纸质历史档案归档。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

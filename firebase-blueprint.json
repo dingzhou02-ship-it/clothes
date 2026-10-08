@@ -1,0 +1,388 @@
+{
+  "entities": {
+    "user": {
+      "title": "User",
+      "description": "Internal store staff or administrator account",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "staff"] },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "customer": {
+      "title": "Customer",
+      "description": "Tailoring customer master profile",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 64 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "gender": { "type": "string", "enum": ["male", "female", "other"] },
+        "level": { "type": "string", "enum": ["normal", "vip", "svip"] },
+        "birthday": { "type": "string" },
+        "occupation": { "type": "string" },
+        "address": { "type": "string" },
+        "source": { "type": "string" },
+        "remarks": { "type": "string" },
+        "orderCount": { "type": "integer" },
+        "totalSpent": { "type": "integer" },
+        "walletBalance": { "type": "integer" },
+        "lastMeasurementDate": { "type": "string" },
+        "lastOrderDate": { "type": "string" },
+        "isDeleted": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["customerId", "name", "phone", "level"]
+    },
+    "measurement": {
+      "title": "Measurement",
+      "description": "Historical measurement record for bespoke fitting",
+      "type": "object",
+      "properties": {
+        "measurementId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "isCurrent": { "type": "boolean" },
+        "measureDate": { "type": "string" },
+        "operatorId": { "type": "string" },
+        "operatorName": { "type": "string" },
+        "height": { "type": "number" },
+        "weight": { "type": "number" },
+        "shoulder": { "type": "number" },
+        "chest": { "type": "number" },
+        "waist": { "type": "number" },
+        "hips": { "type": "number" },
+        "sleeveLength": { "type": "number" },
+        "clothLength": { "type": "number" },
+        "upperArm": { "type": "number" },
+        "wrist": { "type": "number" },
+        "customItems": { "type": "array" },
+        "remarks": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["measurementId", "customerId", "measureDate"]
+    },
+    "material": {
+      "title": "Material",
+      "description": "Fabric and material inventory item",
+      "type": "object",
+      "properties": {
+        "materialId": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 100 },
+        "brand": { "type": "string" },
+        "category": { "type": "array" },
+        "composition": { "type": "string" },
+        "color": { "type": "string" },
+        "pattern": { "type": "string" },
+        "weight": { "type": "number" },
+        "season": { "type": "string" },
+        "costPrice": { "type": "integer" },
+        "salePrice": { "type": "integer" },
+        "stockQuantity": { "type": "number" },
+        "safetyStock": { "type": "number" },
+        "location": { "type": "string" },
+        "imageUrls": { "type": "array" },
+        "remarks": { "type": "string" },
+        "isDeleted": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["materialId", "name", "stockQuantity", "safetyStock"]
+    },
+    "inventoryTransaction": {
+      "title": "InventoryTransaction",
+      "description": "Fabric stock mutation audit trail",
+      "type": "object",
+      "properties": {
+        "transactionId": { "type": "string", "maxLength": 64 },
+        "materialId": { "type": "string", "maxLength": 64 },
+        "type": { "type": "string", "enum": ["purchase_in", "manual_in", "order_consume", "manual_out", "audit_adjust"] },
+        "quantity": { "type": "number" },
+        "beforeQuantity": { "type": "number" },
+        "afterQuantity": { "type": "number" },
+        "relatedOrderId": { "type": "string" },
+        "operatorId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "remarks": { "type": "string" }
+      },
+      "required": ["transactionId", "materialId", "type", "quantity"]
+    },
+    "style": {
+      "title": "Style",
+      "description": "Garment style catalog and craftsmanship configurations",
+      "type": "object",
+      "properties": {
+        "styleId": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 100 },
+        "category": { "type": "string", "enum": ["西服", "衬衫", "大衣", "中式服装", "女装", "裤装", "其他"] },
+        "imageUrl": { "type": "string" },
+        "description": { "type": "string" },
+        "parameters": { "type": "object" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["styleId", "name", "category"]
+    },
+    "order": {
+      "title": "Order",
+      "description": "Bespoke tailoring customer order master document",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "customerName": { "type": "string", "maxLength": 64 },
+        "customerPhone": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["pending", "placed", "making", "processing", "completed", "picked_up", "cancelled"] },
+        "totalAmount": { "type": "integer" },
+        "discountAmount": { "type": "integer" },
+        "payableAmount": { "type": "integer" },
+        "paidAmount": { "type": "integer" },
+        "unpaidAmount": { "type": "integer" },
+        "paymentStatus": { "type": "string", "enum": ["unpaid", "partial", "paid", "refunded"] },
+        "estimatedDeliveryDate": { "type": "string" },
+        "statusHistory": { "type": "array" },
+        "remarks": { "type": "string" },
+        "operatorId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["orderId", "customerId", "status", "payableAmount"]
+    },
+    "orderItem": {
+      "title": "OrderItem",
+      "description": "Item details within a bespoke order with snapshot of fabric and measurement",
+      "type": "object",
+      "properties": {
+        "itemId": { "type": "string", "maxLength": 64 },
+        "orderId": { "type": "string", "maxLength": 64 },
+        "category": { "type": "string" },
+        "productName": { "type": "string" },
+        "quantity": { "type": "integer" },
+        "materialId": { "type": "string" },
+        "materialNameSnapshot": { "type": "string" },
+        "styleId": { "type": "string" },
+        "styleNameSnapshot": { "type": "string" },
+        "measurementIdSnapshot": { "type": "string" },
+        "measurementDataSnapshot": { "type": "object" },
+        "unitPrice": { "type": "integer" },
+        "discountRate": { "type": "number" },
+        "subtotal": { "type": "integer" },
+        "customOptions": { "type": "object" },
+        "remarks": { "type": "string" }
+      },
+      "required": ["itemId", "orderId", "productName", "quantity", "subtotal"]
+    },
+    "orderPayment": {
+      "title": "OrderPayment",
+      "description": "Installment payment record for order deposit or final balance",
+      "type": "object",
+      "properties": {
+        "paymentId": { "type": "string", "maxLength": 64 },
+        "orderId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "stage": { "type": "string", "enum": ["deposit", "final", "full", "additional"] },
+        "amount": { "type": "integer" },
+        "paymentMethod": { "type": "string", "enum": ["wallet", "cash", "wechat", "alipay", "other"] },
+        "walletTransactionId": { "type": "string" },
+        "operatorId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "remarks": { "type": "string" }
+      },
+      "required": ["paymentId", "orderId", "amount", "paymentMethod"]
+    },
+    "wallet": {
+      "title": "Wallet",
+      "description": "Customer store credit wallet account",
+      "type": "object",
+      "properties": {
+        "walletId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "balance": { "type": "integer" },
+        "totalRecharged": { "type": "integer" },
+        "totalConsumed": { "type": "integer" },
+        "version": { "type": "integer" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["walletId", "customerId", "balance"]
+    },
+    "walletTransaction": {
+      "title": "WalletTransaction",
+      "description": "Immutable ledger entry for store credit mutations",
+      "type": "object",
+      "properties": {
+        "transactionId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "type": { "type": "string", "enum": ["recharge", "consume", "refund", "manual_adjust"] },
+        "amount": { "type": "integer" },
+        "balanceBefore": { "type": "integer" },
+        "balanceAfter": { "type": "integer" },
+        "paymentMethod": { "type": "string" },
+        "relatedOrderId": { "type": "string" },
+        "paymentOrderId": { "type": "string" },
+        "operatorId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "remarks": { "type": "string" }
+      },
+      "required": ["transactionId", "customerId", "type", "amount", "balanceBefore", "balanceAfter"]
+    },
+    "paymentOrder": {
+      "title": "PaymentOrder",
+      "description": "Payment gateway order placeholder for Wechat/Alipay",
+      "type": "object",
+      "properties": {
+        "paymentOrderId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "amount": { "type": "integer" },
+        "provider": { "type": "string", "enum": ["mock", "wechat", "alipay"] },
+        "status": { "type": "string", "enum": ["pending", "paid", "failed", "cancelled", "refunded"] },
+        "providerTransactionId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "paidAt": { "type": "string" },
+        "relatedWalletTransactionId": { "type": "string" }
+      },
+      "required": ["paymentOrderId", "customerId", "amount", "provider", "status"]
+    },
+    "customerFile": {
+      "title": "CustomerFile",
+      "description": "Paper order scan or measurement PDF metadata",
+      "type": "object",
+      "properties": {
+        "fileId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "fileName": { "type": "string", "maxLength": 255 },
+        "fileType": { "type": "string", "enum": ["historical_order", "historical_measurement", "other"] },
+        "year": { "type": "integer" },
+        "fileUrl": { "type": "string" },
+        "fileSize": { "type": "integer" },
+        "operatorId": { "type": "string" },
+        "remarks": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["fileId", "customerId", "fileName", "year", "fileUrl"]
+    },
+    "customerImage": {
+      "title": "CustomerImage",
+      "description": "Customer fitting photo or garment finished shot",
+      "type": "object",
+      "properties": {
+        "imageId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "imageType": { "type": "string", "enum": ["front", "side", "back", "finished", "other"] },
+        "imageUrl": { "type": "string" },
+        "title": { "type": "string" },
+        "remarks": { "type": "string" },
+        "operatorId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["imageId", "customerId", "imageUrl", "imageType"]
+    },
+    "setting": {
+      "title": "Setting",
+      "description": "Store configuration and discount rules",
+      "type": "object",
+      "properties": {
+        "settingId": { "type": "string" },
+        "shopName": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "businessHours": { "type": "string" },
+        "vipDiscountRate": { "type": "number" },
+        "svipDiscountRate": { "type": "number" },
+        "defaultSafetyStock": { "type": "number" },
+        "printHeader": { "type": "string" },
+        "printFooter": { "type": "string" }
+      },
+      "required": ["settingId", "shopName"]
+    },
+    "auditLog": {
+      "title": "AuditLog",
+      "description": "System operation audit log",
+      "type": "object",
+      "properties": {
+        "logId": { "type": "string", "maxLength": 64 },
+        "operatorId": { "type": "string" },
+        "action": { "type": "string" },
+        "targetType": { "type": "string" },
+        "targetId": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "details": { "type": "string" }
+      },
+      "required": ["logId", "action", "targetType", "targetId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "user" },
+      "description": "Staff and store manager user collection"
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "user" },
+      "description": "Administrator validation collection"
+    },
+    "/customers/{customerId}": {
+      "schema": { "$ref": "customer" },
+      "description": "Bespoke tailoring customer directory"
+    },
+    "/measurements/{measurementId}": {
+      "schema": { "$ref": "measurement" },
+      "description": "Individual measurement records for customers"
+    },
+    "/materials/{materialId}": {
+      "schema": { "$ref": "material" },
+      "description": "Fabrics and textile inventory"
+    },
+    "/inventoryTransactions/{transactionId}": {
+      "schema": { "$ref": "inventoryTransaction" },
+      "description": "Fabric stock mutation audit trail"
+    },
+    "/styles/{styleId}": {
+      "schema": { "$ref": "style" },
+      "description": "Bespoke styling options and craftsmanship configs"
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "order" },
+      "description": "Customer bespoke tailoring orders"
+    },
+    "/orderItems/{itemId}": {
+      "schema": { "$ref": "orderItem" },
+      "description": "Line items in bespoke orders"
+    },
+    "/orderPayments/{paymentId}": {
+      "schema": { "$ref": "orderPayment" },
+      "description": "Payments made towards orders"
+    },
+    "/wallets/{customerId}": {
+      "schema": { "$ref": "wallet" },
+      "description": "Customer store credit wallets"
+    },
+    "/walletTransactions/{transactionId}": {
+      "schema": { "$ref": "walletTransaction" },
+      "description": "Customer wallet financial transactions log"
+    },
+    "/paymentOrders/{paymentOrderId}": {
+      "schema": { "$ref": "paymentOrder" },
+      "description": "External payment orders"
+    },
+    "/customerFiles/{fileId}": {
+      "schema": { "$ref": "customerFile" },
+      "description": "Historical paper scan documents and PDFs"
+    },
+    "/customerImages/{imageId}": {
+      "schema": { "$ref": "customerImage" },
+      "description": "Customer fitting images and garment photos"
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "setting" },
+      "description": "Store configuration and rules"
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "auditLog" },
+      "description": "Audit log records"
+    }
+  }
+}
