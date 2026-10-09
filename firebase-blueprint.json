@@ -306,13 +306,58 @@
       "properties": {
         "logId": { "type": "string", "maxLength": 64 },
         "operatorId": { "type": "string" },
+        "operatorName": { "type": "string" },
         "action": { "type": "string" },
         "targetType": { "type": "string" },
         "targetId": { "type": "string" },
         "timestamp": { "type": "string" },
-        "details": { "type": "string" }
+        "details": { "type": "string" },
+        "result": { "type": "string", "enum": ["success", "failure"] }
       },
       "required": ["logId", "action", "targetType", "targetId"]
+    },
+    "fileChunk": {
+      "title": "FileChunk",
+      "description": "Encrypted/chunked binary file slice for multi-device PDF and image storage",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fileId": { "type": "string" },
+        "chunkIndex": { "type": "integer" },
+        "totalChunks": { "type": "integer" },
+        "data": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "fileId", "chunkIndex", "totalChunks", "data"]
+    },
+    "role": {
+      "title": "Role",
+      "description": "Configurable operator role and granular permission matrix",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "roleKey": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "isSystem": { "type": "boolean" },
+        "permissions": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "roleKey", "name", "permissions"]
+    },
+    "allowedEmail": {
+      "title": "AllowedEmail",
+      "description": "Whitelisted operator email lookup for strict Firestore access control",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "staff"] },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "operatorId": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["email", "role", "status"]
     }
   },
   "firestore": {
@@ -323,6 +368,18 @@
     "/admins/{userId}": {
       "schema": { "$ref": "user" },
       "description": "Administrator validation collection"
+    },
+    "/allowedEmails/{email}": {
+      "schema": { "$ref": "allowedEmail" },
+      "description": "Whitelisted emails allowed to access the system"
+    },
+    "/roles/{roleId}": {
+      "schema": { "$ref": "role" },
+      "description": "Configurable operator roles and permissions"
+    },
+    "/fileChunks/{chunkId}": {
+      "schema": { "$ref": "fileChunk" },
+      "description": "Chunked PDF and photo storage for cross-device sync"
     },
     "/customers/{customerId}": {
       "schema": { "$ref": "customer" },

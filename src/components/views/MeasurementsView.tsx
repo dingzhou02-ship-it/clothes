@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Ruler, Search, Printer, Plus, CheckCircle2, User } from 'lucide-react';
+import { Ruler, Search, Printer, Plus, CheckCircle2, User, Trash2 } from 'lucide-react';
 import { Measurement, Customer } from '../../types';
 import { formatDate } from '../../utils/formatters';
 
@@ -9,6 +9,7 @@ interface MeasurementsViewProps {
   onSelectCustomer: (customer: Customer) => void;
   onOpenAddMeasurement: (customer: Customer) => void;
   onOpenPrintMeasurement: (measurement: Measurement, customer: Customer) => void;
+  onDeleteMeasurement?: (measurement: Measurement) => void;
 }
 
 export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
@@ -17,6 +18,7 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
   onSelectCustomer,
   onOpenAddMeasurement,
   onOpenPrintMeasurement,
+  onDeleteMeasurement,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -104,6 +106,16 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
                     >
                       <Printer className="w-3.5 h-3.5" />
                       <span>A4 打印量体单</span>
+                    </button>
+                  )}
+                  {onDeleteMeasurement && (
+                    <button
+                      onClick={() => onDeleteMeasurement(m)}
+                      className="px-2.5 py-1.5 text-xs text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200/60 rounded-lg flex items-center space-x-1 cursor-pointer transition-colors"
+                      title="删除量体单"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>删除</span>
                     </button>
                   )}
                 </div>

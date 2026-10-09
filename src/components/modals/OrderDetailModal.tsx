@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Plus,
+  Trash2,
 } from 'lucide-react';
 import { Order, OrderStatus, PaymentMethod, PaymentStage, StoreSetting } from '../../types';
 import {
@@ -28,6 +29,7 @@ interface OrderDetailModalProps {
   onUpdateStatus: (orderId: string, status: OrderStatus, note: string) => Promise<void>;
   onAddPayment: (orderId: string, amountCents: number, method: PaymentMethod, stage: PaymentStage, remarks?: string) => Promise<void>;
   onOpenPrint: (order: Order) => void;
+  onDeleteOrder?: (order: Order) => void;
 }
 
 export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
@@ -38,6 +40,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   onUpdateStatus,
   onAddPayment,
   onOpenPrint,
+  onDeleteOrder,
 }) => {
   const [showStatusUpdate, setShowStatusUpdate] = useState(false);
   const [newStatus, setNewStatus] = useState<OrderStatus>(order.status);
@@ -119,6 +122,17 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           </div>
 
           <div className="flex items-center space-x-2">
+            {onDeleteOrder && (
+              <button
+                type="button"
+                onClick={() => onDeleteOrder(order)}
+                className="px-3 py-1.5 bg-rose-950/60 hover:bg-rose-600 text-rose-200 hover:text-white border border-rose-800/80 rounded-lg text-xs font-semibold flex items-center space-x-1 cursor-pointer transition-colors"
+                title="删除该订单"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>删除订单</span>
+              </button>
+            )}
             <button
               onClick={() => onOpenPrint(order)}
               className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-amber-400 border border-stone-700 rounded-lg text-xs font-semibold flex items-center space-x-1 cursor-pointer transition-colors"

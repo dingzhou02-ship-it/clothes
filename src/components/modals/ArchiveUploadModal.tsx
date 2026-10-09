@@ -1,7 +1,27 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, FileText, Upload, AlertCircle, CheckCircle2, Image as ImageIcon, FileCheck, Loader2 } from 'lucide-react';
+import {
+  X,
+  FileText,
+  Upload,
+  AlertCircle,
+  CheckCircle2,
+  Image as ImageIcon,
+  Loader2,
+  RefreshCw,
+  ShieldCheck,
+} from 'lucide-react';
 import { Customer } from '../../types';
-import { storageService } from '../../services/storageService';
+import { storageService, UploadResult } from '../../services/storageService';
+
+type UploadStage =
+  | 'idle'
+  | 'uploading_file'
+  | 'file_uploaded'
+  | 'saving_metadata'
+  | 'verifying_read'
+  | 'completed'
+  | 'failed_upload'
+  | 'failed_metadata';
 
 interface ArchiveUploadModalProps {
   isOpen: boolean;
@@ -16,6 +36,10 @@ interface ArchiveUploadModalProps {
     year: number;
     fileUrl: string;
     fileSize: number;
+    mimeType?: string;
+    storageMode?: 'firebase_storage' | 'firestore_chunks' | 'data_url' | 'external_url';
+    chunkCount?: number;
+    verifyStatus?: 'verified' | 'pending';
     remarks: string;
   }) => Promise<void>;
 }
@@ -35,6 +59,9 @@ export const ArchiveUploadModal: React.FC<ArchiveUploadModalProps> = ({
   
   // Real File Upload States
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
+  const [uploadedResult, setUploadedResult] = useState<UploadResult | null>(null);
+  const [stage, setStage] = useState<UploadStage>('idle');
   const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -52,6 +79,12 @@ export const ArchiveUploadModal: React.FC<ArchiveUploadModalProps> = ({
     }
     setError('');
     setSelectedFile(null);
+    setLocalPreviewUrl(prev => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setUploadedResult(null);
+    setStage('idle');
     setUploadProgress(0);
   }, [preselectedCustomer, customers, isOpen]);
 
@@ -68,13 +101,22 @@ export const ArchiveUploadModal: React.FC<ArchiveUploadModalProps> = ({
       return;
     }
 
-    if (file.size > 25 * 1024 * 1024) {
-      setError('文件过大：单个文件大小请勿超过 25MB');
+    if (file.size > 15 * 1024 * 1024) {
+      setError('文件过大：单个文件大小请勿超过 15MB');
       return;
     }
 
     setError('');
     setSelectedFile(file);
+    setLocalPreviewUrl(prev => {
+      if (prev) URL.revokeObjectURL(prev);
+      return file.type.startsWith('image/') || !file.name.toLowerCase().endsWith('.pdf')
+        ? URL.createObjectURL(file)
+        : null;
+    });
+    setUploadedResult(null);
+    setStage('idle');
+    setUploadProgress(0);
     if (!fileName.trim()) {
       setFileName(file.name);
     }
@@ -88,13 +130,12 @@ export const ArchiveUploadModal: React.FC<ArchiveUploadModalProps> = ({
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const executeUploadFlow = async (reuseUploaded?: UploadResult | null) => {
     if (!currentCustomer) {
       setError('请选择所属客户');
       return;
     }
-    if (!selectedFile) {
+    if (!selectedFile && !reuseUploaded) {
       setError('请先点击或拖拽选择本地档案文件（PDF 或 照片）');
       return;
     }
@@ -103,33 +144,82 @@ export const ArchiveUploadModal: React.FC<ArchiveUploadModalProps> = ({
       return;
     }
 
+    setLoading(true);
+    setError('');
+
+    let currentUpload = reuseUploaded || uploadedResult;
+
     try {
-      setLoading(true);
-      setError('');
-      setUploadProgress(10);
+      // Stage 1: Upload File to Cloud Chunks (if not already uploaded)
+      if (!currentUpload && selectedFile) {
+        setStage('uploading_file');
+        setUploadProgress(0);
+        currentUpload = await storageService.uploadFile(selectedFile, 'archives', progress => {
+          setUploadProgress(progress);
+        });
+        setUploadedResult(currentUpload);
+        setStage('file_uploaded');
+      }
+    } catch (uploadErr: any) {
+      setStage('failed_upload');
+      setError(uploadErr?.message || '文件上传至云端存储失败，请检查网络或重试');
+      setLoading(false);
+      return;
+    }
 
-      // Upload file to storage (Firebase Storage with seamless local fallback)
-      const uploadRes = await storageService.uploadFile(selectedFile, 'archives', progress => {
-        setUploadProgress(progress);
-      });
+    if (!currentUpload) {
+      setStage('failed_upload');
+      setError('未获取到已上传的文件数据，请重试');
+      setLoading(false);
+      return;
+    }
 
+    try {
+      // Stage 2: Save Metadata Record to Firestore and link customer
+      setStage('saving_metadata');
       await onUploadSuccess({
         customerId: currentCustomer.id,
         customerName: currentCustomer.name,
         fileName: fileName.trim(),
         fileType,
         year: Number(year),
-        fileUrl: uploadRes.url,
-        fileSize: uploadRes.size,
+        fileUrl: currentUpload.url,
+        fileSize: currentUpload.size,
+        mimeType: currentUpload.type,
+        storageMode: currentUpload.storageType,
+        chunkCount: currentUpload.chunkCount,
+        verifyStatus: 'verified',
         remarks: remarks.trim(),
       });
 
-      onClose();
-    } catch (err: any) {
-      setError(err?.message || '归档上传失败，请检查网络或重试');
+      // Stage 3: Verify file is readable from cloud
+      setStage('verifying_read');
+      const readable = await storageService.verifyFileReadable(
+        currentUpload.url,
+        currentUpload.chunkCount
+      );
+      if (!readable) {
+        throw new Error('档案记录已保存，但云端读取校验未通过，请点击重试校验');
+      }
+
+      setStage('completed');
+      setTimeout(() => {
+        onClose();
+      }, 450);
+    } catch (metaErr: any) {
+      setStage('failed_metadata');
+      setError(
+        metaErr?.message ||
+          '文件已上传成功，但写入客户档案记录失败。您可以直接点击“仅重试保存档案记录”恢复，无需重新上传文件。'
+      );
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await executeUploadFlow(uploadedResult);
   };
 
   const formatFileSize = (bytes: number) => {
@@ -265,40 +355,58 @@ export const ArchiveUploadModal: React.FC<ArchiveUploadModalProps> = ({
                 </button>
               </div>
             ) : (
-              <div className="border border-stone-200 rounded-2xl p-4 bg-stone-50 flex items-center justify-between">
-                <div className="flex items-center space-x-3 overflow-hidden">
-                  <div className={`p-2.5 rounded-xl text-white shrink-0 ${isPdf ? 'bg-rose-600' : 'bg-blue-600'}`}>
-                    {isPdf ? <FileText className="w-5 h-5" /> : <ImageIcon className="w-5 h-5" />}
+              <div className="border border-stone-200 rounded-2xl p-4 bg-stone-50 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3 overflow-hidden">
+                    <div className={`p-2.5 rounded-xl text-white shrink-0 ${isPdf ? 'bg-rose-600' : 'bg-blue-600'}`}>
+                      {isPdf ? <FileText className="w-5 h-5" /> : <ImageIcon className="w-5 h-5" />}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-stone-900 truncate">
+                        {selectedFile.name}
+                      </p>
+                      <p className="text-[11px] text-stone-400 font-mono">
+                        {formatFileSize(selectedFile.size)} · {isPdf ? 'PDF 文档' : '图片档案（上传后将直接以高清图片形式呈现）'}
+                      </p>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-stone-900 truncate">
-                      {selectedFile.name}
-                    </p>
-                    <p className="text-[11px] text-stone-400 font-mono">
-                      {formatFileSize(selectedFile.size)} · {isPdf ? 'PDF 文档' : '图片文件'}
-                    </p>
+
+                  <div className="flex items-center space-x-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={loading}
+                      className="px-2.5 py-1 text-xs text-stone-600 hover:text-stone-900 bg-white border border-stone-200 rounded-lg cursor-pointer hover:bg-stone-100"
+                    >
+                      更换
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedFile(null);
+                        if (localPreviewUrl) {
+                          URL.revokeObjectURL(localPreviewUrl);
+                          setLocalPreviewUrl(null);
+                        }
+                      }}
+                      disabled={loading}
+                      className="p-1 text-stone-400 hover:text-rose-600 rounded-lg cursor-pointer"
+                      title="移除所选文件"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={loading}
-                    className="px-2.5 py-1 text-xs text-stone-600 hover:text-stone-900 bg-white border border-stone-200 rounded-lg cursor-pointer hover:bg-stone-100"
-                  >
-                    更换
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedFile(null)}
-                    disabled={loading}
-                    className="p-1 text-stone-400 hover:text-rose-600 rounded-lg cursor-pointer"
-                    title="移除所选文件"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
+                {localPreviewUrl && !isPdf && (
+                  <div className="rounded-xl overflow-hidden border border-stone-200 bg-stone-900/95 flex items-center justify-center max-h-60">
+                    <img
+                      src={localPreviewUrl}
+                      alt={selectedFile.name}
+                      className="max-h-60 w-auto object-contain"
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -330,21 +438,84 @@ export const ArchiveUploadModal: React.FC<ArchiveUploadModalProps> = ({
             />
           </div>
 
-          {/* Upload progress indicator */}
-          {loading && (
-            <div className="space-y-1.5 p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl">
-              <div className="flex items-center justify-between text-xs text-amber-900 font-medium">
+          {/* 3-Stage Upload & Verification Status Indicator */}
+          {stage !== 'idle' && (
+            <div className="space-y-2.5 p-3.5 bg-stone-50 border border-stone-200 rounded-xl">
+              <div className="flex items-center justify-between text-xs font-semibold text-stone-800">
                 <span className="flex items-center space-x-1.5">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>正在上传并归档文件至安全存储...</span>
+                  {loading ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                  ) : stage === 'completed' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-600" />
+                  )}
+                  <span>
+                    {stage === 'uploading_file' && '阶段 1/3：正在将文件分片上传至云端安全存储...'}
+                    {stage === 'file_uploaded' && '阶段 1/3：文件已上传成功，准备写入档案记录...'}
+                    {stage === 'saving_metadata' && '阶段 2/3：正在将档案元数据写入云端数据库并关联客户...'}
+                    {stage === 'verifying_read' && '阶段 3/3：正在校验云端档案完整性与可读取状态...'}
+                    {stage === 'completed' && '全部完成：文件已上传、档案记录已保存且校验可正常读取！'}
+                    {stage === 'failed_upload' && '上传中断：文件上传至云端存储未完成'}
+                    {stage === 'failed_metadata' && '待恢复：文件已上传成功，但档案记录写入未完成'}
+                  </span>
                 </span>
-                <span className="font-mono">{uploadProgress}%</span>
+                <span className="font-mono text-amber-700 font-bold">{uploadProgress}%</span>
               </div>
-              <div className="w-full bg-amber-200/60 rounded-full h-1.5 overflow-hidden">
+
+              <div className="w-full bg-stone-200 rounded-full h-1.5 overflow-hidden">
                 <div
-                  className="bg-amber-600 h-1.5 rounded-full transition-all duration-300"
+                  className={`h-1.5 rounded-full transition-all duration-300 ${
+                    stage === 'completed'
+                      ? 'bg-emerald-600'
+                      : stage === 'failed_upload' || stage === 'failed_metadata'
+                      ? 'bg-rose-500'
+                      : 'bg-amber-600'
+                  }`}
                   style={{ width: `${uploadProgress}%` }}
                 />
+              </div>
+
+              {/* 3 Distinct Status Checkpoints */}
+              <div className="grid grid-cols-3 gap-2 pt-1 text-[11px]">
+                <div
+                  className={`flex items-center space-x-1 px-2 py-1 rounded-lg border ${
+                    uploadedResult
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800 font-semibold'
+                      : stage === 'uploading_file'
+                      ? 'bg-amber-50 border-amber-200 text-amber-800'
+                      : 'bg-white border-stone-200 text-stone-400'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3 h-3 shrink-0" />
+                  <span className="truncate">1. 文件上传成功</span>
+                </div>
+                <div
+                  className={`flex items-center space-x-1 px-2 py-1 rounded-lg border ${
+                    stage === 'verifying_read' || stage === 'completed'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800 font-semibold'
+                      : stage === 'saving_metadata'
+                      ? 'bg-amber-50 border-amber-200 text-amber-800'
+                      : stage === 'failed_metadata'
+                      ? 'bg-rose-50 border-rose-200 text-rose-700'
+                      : 'bg-white border-stone-200 text-stone-400'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3 h-3 shrink-0" />
+                  <span className="truncate">2. 档案记录保存</span>
+                </div>
+                <div
+                  className={`flex items-center space-x-1 px-2 py-1 rounded-lg border ${
+                    stage === 'completed'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800 font-semibold'
+                      : stage === 'verifying_read'
+                      ? 'bg-amber-50 border-amber-200 text-amber-800'
+                      : 'bg-white border-stone-200 text-stone-400'
+                  }`}
+                >
+                  <ShieldCheck className="w-3 h-3 shrink-0" />
+                  <span className="truncate">3. 档案正常读取</span>
+                </div>
               </div>
             </div>
           )}
@@ -358,6 +529,19 @@ export const ArchiveUploadModal: React.FC<ArchiveUploadModalProps> = ({
             >
               取消
             </button>
+
+            {stage === 'failed_metadata' && uploadedResult && (
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => executeUploadFlow(uploadedResult)}
+                className="px-4 py-2 text-xs font-bold text-white bg-amber-600 rounded-xl hover:bg-amber-700 shadow-xs cursor-pointer flex items-center space-x-1.5 transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>仅重试保存档案记录 (无需重传文件)</span>
+              </button>
+            )}
+
             <button
               type="submit"
               disabled={loading || !selectedFile}
@@ -366,7 +550,12 @@ export const ArchiveUploadModal: React.FC<ArchiveUploadModalProps> = ({
               {loading ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>上传中 {uploadProgress}%</span>
+                  <span>正在处理 ({uploadProgress}%)</span>
+                </>
+              ) : stage === 'failed_upload' ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>重新上传文件</span>
                 </>
               ) : (
                 <span>确认上传归档</span>

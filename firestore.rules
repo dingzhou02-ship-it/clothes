@@ -11,15 +11,44 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isOwner() {
+      return isSignedIn() &&
+        request.auth.token.email != null &&
+        request.auth.token.email == "dingzhou02@gmail.com";
+    }
+
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == "dingzhou02@gmail.com" ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        isOwner() ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == "active"
+        ) ||
+        (
+          request.auth.token.email != null &&
+          exists(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)) &&
+          get(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)).data.role == "admin" &&
+          get(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)).data.status == "active"
+        )
       );
     }
 
     function isStaff() {
-      return isSignedIn();
+      return isSignedIn() && (
+        isOwner() ||
+        isAdmin() ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == "active"
+        ) ||
+        (
+          request.auth.token.email != null &&
+          exists(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)) &&
+          get(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)).data.status == "active"
+        )
+      );
     }
 
     function isValidId(id) {
@@ -28,15 +57,40 @@ service cloud.firestore {
 
     // Admins collection
     match /admins/{userId} {
-      allow read: if isSignedIn();
+      allow read: if isStaff();
       allow write: if isAdmin();
     }
 
-    // Users (staff) collection
+    // Whitelisted operator emails
+    match /allowedEmails/{email} {
+      allow read: if isSignedIn() && (isStaff() || request.auth.token.email == email);
+      allow write: if isAdmin();
+    }
+
+    // Roles & permissions collection
+    match /roles/{roleId} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
+    // Users (staff / operators) collection
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create, update: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow read: if isStaff() || (isSignedIn() && request.auth.uid == userId);
+      allow create: if isAdmin() || (isOwner() && request.auth.uid == userId);
+      allow update: if isAdmin() || (
+        isStaff() &&
+        request.auth.uid == userId &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.status == resource.data.status
+      );
       allow delete: if isAdmin();
+    }
+
+    // Chunked cloud file storage for PDFs and high-res photos
+    match /fileChunks/{chunkId} {
+      allow read: if isStaff();
+      allow create, update: if isStaff() && isValidId(chunkId);
+      allow delete: if isStaff();
     }
 
     // Customers collection
@@ -44,7 +98,7 @@ service cloud.firestore {
       allow read: if isStaff();
       allow create: if isStaff() && isValidId(customerId);
       allow update: if isStaff() && isValidId(customerId);
-      allow delete: if isAdmin();
+      allow delete: if isStaff();
     }
 
     // Measurements collection
@@ -52,14 +106,14 @@ service cloud.firestore {
       allow read: if isStaff();
       allow create: if isStaff() && isValidId(measurementId);
       allow update: if isStaff() && isValidId(measurementId);
-      allow delete: if isAdmin();
+      allow delete: if isStaff();
     }
 
     // Materials and inventory
     match /materials/{materialId} {
       allow read: if isStaff();
       allow create, update: if isStaff() && isValidId(materialId);
-      allow delete: if isAdmin();
+      allow delete: if isStaff();
     }
 
     match /inventoryTransactions/{transactionId} {
@@ -72,20 +126,20 @@ service cloud.firestore {
     match /styles/{styleId} {
       allow read: if isStaff();
       allow create, update: if isStaff() && isValidId(styleId);
-      allow delete: if isAdmin();
+      allow delete: if isStaff();
     }
 
     // Orders and OrderItems
     match /orders/{orderId} {
       allow read: if isStaff();
       allow create, update: if isStaff() && isValidId(orderId);
-      allow delete: if isAdmin();
+      allow delete: if isStaff();
     }
 
     match /orderItems/{itemId} {
       allow read: if isStaff();
       allow create, update: if isStaff() && isValidId(itemId);
-      allow delete: if isAdmin();
+      allow delete: if isStaff();
     }
 
     match /orderPayments/{paymentId} {

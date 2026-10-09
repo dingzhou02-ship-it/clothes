@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { Scissors, Search, Plus, Tag, Check, Sparkles } from 'lucide-react';
+import { Scissors, Search, Plus, Tag, Check, Sparkles, Trash2 } from 'lucide-react';
 import { Style } from '../../types';
+import { ResolvedImage } from '../common/ResolvedImage';
 
 interface StylesViewProps {
   styles: Style[];
   onOpenCreateStyle: () => void;
+  onDeleteStyle?: (style: Style) => void;
 }
 
-export const StylesView: React.FC<StylesViewProps> = ({ styles, onOpenCreateStyle }) => {
+export const StylesView: React.FC<StylesViewProps> = ({ styles, onOpenCreateStyle, onDeleteStyle }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -87,10 +89,11 @@ export const StylesView: React.FC<StylesViewProps> = ({ styles, onOpenCreateStyl
               {/* Style Image */}
               <div className="h-48 bg-stone-100 overflow-hidden relative">
                 {s.imageUrl ? (
-                  <img
+                  <ResolvedImage
                     src={s.imageUrl}
                     alt={s.name}
                     className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+                    fallbackText="暂无款式样衣照"
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-stone-400 text-xs">
@@ -132,10 +135,23 @@ export const StylesView: React.FC<StylesViewProps> = ({ styles, onOpenCreateStyl
 
             <div className="p-3 bg-stone-50/60 border-t border-stone-100 flex items-center justify-between text-xs text-stone-500">
               <span>创建归档时间：{s.createdAt.split('T')[0]}</span>
-              <span className="text-emerald-700 font-semibold flex items-center space-x-1">
-                <Check className="w-3.5 h-3.5" />
-                <span>可直接调用建单</span>
-              </span>
+              <div className="flex items-center space-x-2">
+                <span className="text-emerald-700 font-semibold flex items-center space-x-1">
+                  <Check className="w-3.5 h-3.5" />
+                  <span>可直接调用建单</span>
+                </span>
+                {onDeleteStyle && (
+                  <button
+                    type="button"
+                    onClick={() => onDeleteStyle(s)}
+                    className="px-2 py-1 text-xs text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg font-medium transition-colors cursor-pointer inline-flex items-center space-x-1"
+                    title="删除该服装款式"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>删除</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         ))}

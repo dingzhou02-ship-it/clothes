@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { X, Scissors, Plus, Trash2, AlertCircle } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { X, Scissors, Plus, Trash2, AlertCircle, Upload, Loader2, CheckCircle2 } from 'lucide-react';
 import { Style } from '../../types';
+import { storageService } from '../../services/storageService';
+import { ResolvedImage } from '../common/ResolvedImage';
 
 interface CreateStyleModalProps {
   isOpen: boolean;
@@ -16,6 +18,7 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
   const [name, setName] = useState('');
   const [category, setCategory] = useState('西服');
   const [imageUrl, setImageUrl] = useState('');
+  const [uploadingImg, setUploadingImg] = useState(false);
   const [description, setDescription] = useState('');
   const [params, setParams] = useState<{ key: string; value: string }[]>([
     { key: '版型风格', value: '英式全毛衬收腰' },
@@ -24,8 +27,24 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
   ]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
+
+  const handleLocalImageUpload = async (file: File | null) => {
+    if (!file) return;
+    try {
+      setUploadingImg(true);
+      setError('');
+      const res = await storageService.uploadFile(file, 'materials');
+      setImageUrl(res.url);
+    } catch (err: any) {
+      setError(err?.message || '上传款式参考图片失败');
+    } finally {
+      setUploadingImg(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const handleAddParam = () => {
     setParams([...params, { key: '', value: '' }]);
@@ -128,14 +147,54 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-stone-700 font-medium mb-1">效果参考图 URL</label>
+              <label className="block text-stone-700 font-medium mb-1">款式样衣照片 (支持本地上传)</label>
               <input
-                type="url"
-                placeholder="https://..."
-                value={imageUrl}
-                onChange={e => setImageUrl(e.target.value)}
-                className="w-full px-3 py-2 border border-stone-300 rounded-lg"
+                ref={fileInputRef}
+                type="file"
+                accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={e => handleLocalImageUpload(e.target.files?.[0] || null)}
               />
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingImg}
+                  className="px-3 py-2 bg-stone-100 hover:bg-stone-200 border border-stone-300 rounded-lg text-stone-800 font-medium flex items-center space-x-1 shrink-0 cursor-pointer"
+                >
+                  {uploadingImg ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                  ) : (
+                    <Upload className="w-3.5 h-3.5 text-amber-600" />
+                  )}
+                  <span>{uploadingImg ? '上传中...' : '上传照片'}</span>
+                </button>
+                <input
+                  type="text"
+                  placeholder="或输入图片URL"
+                  value={imageUrl.startsWith('data:') || imageUrl.startsWith('firestore://') ? '已上传本地样衣照片' : imageUrl}
+                  onChange={e => setImageUrl(e.target.value)}
+                  className="w-full px-2.5 py-2 border border-stone-300 rounded-lg text-xs"
+                />
+              </div>
+              {imageUrl && (
+                <div className="mt-2 flex items-center justify-between bg-stone-50 p-2 rounded-lg border border-stone-200">
+                  <div className="flex items-center space-x-2">
+                    <ResolvedImage src={imageUrl} alt="款式预览" className="w-10 h-10 object-cover rounded-md border border-stone-300" />
+                    <span className="text-[11px] text-emerald-700 font-semibold flex items-center space-x-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>款式照片已准备就绪</span>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setImageUrl('')}
+                    className="text-stone-400 hover:text-rose-600 text-xs cursor-pointer"
+                  >
+                    清除
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

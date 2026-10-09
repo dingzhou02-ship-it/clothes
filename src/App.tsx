@@ -30,6 +30,7 @@ import { PdfPreviewModal } from './components/modals/PdfPreviewModal';
 import { GlobalSearchModal } from './components/modals/GlobalSearchModal';
 import { CreateMaterialModal } from './components/modals/CreateMaterialModal';
 import { CreateStyleModal } from './components/modals/CreateStyleModal';
+import { ConfirmDeleteModal } from './components/modals/ConfirmDeleteModal';
 
 // Services & types
 import { storeService } from './services/storeService';
@@ -50,8 +51,21 @@ import {
 } from './types';
 import { INITIAL_SETTINGS } from './services/seedData';
 
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of items) {
+    if (!item || !item.id) continue;
+    if (!seen.has(item.id)) {
+      seen.add(item.id);
+      result.push(item);
+    }
+  }
+  return result;
+}
+
 function MainApp() {
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { isAuthenticated, loading: authLoading, currentUser, hasPermission } = useAuth();
 
   // Navigation & Selected Views
   const [currentNav, setCurrentNav] = useState<NavItemKey>('workbench');
@@ -105,6 +119,15 @@ function MainApp() {
   const [isCreateMaterialOpen, setIsCreateMaterialOpen] = useState(false);
   const [isCreateStyleOpen, setIsCreateStyleOpen] = useState(false);
 
+  // Confirm Delete Modal State
+  const [deleteDialog, setDeleteDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    confirmLabel?: string;
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+
   // Mobile sidebar
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
@@ -132,13 +155,13 @@ function MainApp() {
         storeService.getSettings(),
       ]);
 
-      setCustomers(custList);
-      setMaterials(matList);
-      setInventoryTransactions(invTxList);
-      setStyles(styList);
-      setOrders(ordList);
-      setWalletTransactions(walTxList);
-      setCustomerFiles(fileList);
+      setCustomers(dedupeById(custList));
+      setMaterials(dedupeById(matList));
+      setInventoryTransactions(dedupeById(invTxList));
+      setStyles(dedupeById(styList));
+      setOrders(dedupeById(ordList));
+      setWalletTransactions(dedupeById(walTxList));
+      setCustomerFiles(dedupeById(fileList));
       setSettings(stg);
     } catch (e) {
       console.error('Error loading store data:', e);
@@ -146,8 +169,68 @@ function MainApp() {
   };
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      // Clear all sensitive business states from React memory upon logout or unauthenticated state
+      setCustomers([]);
+      setMeasurements([]);
+      setMaterials([]);
+      setInventoryTransactions([]);
+      setStyles([]);
+      setOrders([]);
+      setWalletTransactions([]);
+      setCustomerFiles([]);
+      setCustomerImages([]);
+      setSelectedCustomer(null);
+      setSelectedOrder(null);
+      return;
+    }
+
     loadAllData();
-  }, []);
+
+    // Establish real-time multi-device sync across PC, iPad, and iPhone
+    const unsubscribeRealtime = storeService.subscribeToRealtimeUpdates({
+      onCustomers: list => {
+        const unique = dedupeById(list);
+        setCustomers(unique);
+        setSelectedCustomer(prev => (prev ? unique.find(c => c.id === prev.id) || prev : null));
+      },
+      onMeasurements: list => {
+        const unique = dedupeById(list);
+        setSelectedCustomer(currentSelected => {
+          if (currentSelected) {
+            setMeasurements(unique.filter(m => m.customerId === currentSelected.id));
+          } else {
+            setMeasurements(unique);
+          }
+          return currentSelected;
+        });
+      },
+      onMaterials: list => setMaterials(dedupeById(list)),
+      onInventoryTransactions: list => setInventoryTransactions(dedupeById(list)),
+      onStyles: list => setStyles(dedupeById(list)),
+      onOrders: list => {
+        const unique = dedupeById(list);
+        setOrders(unique);
+        setSelectedOrder(prev => (prev ? unique.find(o => o.id === prev.id) || prev : null));
+      },
+      onWalletTransactions: list => setWalletTransactions(dedupeById(list)),
+      onCustomerFiles: list => setCustomerFiles(dedupeById(list)),
+      onCustomerImages: list => {
+        const unique = dedupeById(list);
+        setSelectedCustomer(currentSelected => {
+          if (currentSelected) {
+            setCustomerImages(unique.filter(img => img.customerId === currentSelected.id));
+          }
+          return currentSelected;
+        });
+      },
+      onSettings: stg => setSettings(stg),
+    });
+
+    return () => {
+      unsubscribeRealtime();
+    };
+  }, [isAuthenticated]);
 
   // Keyboard shortcut: Cmd+K / Ctrl+K for Global Search
   useEffect(() => {
@@ -163,18 +246,19 @@ function MainApp() {
 
   // Sync selectedCustomer measurements and images
   useEffect(() => {
+    if (!isAuthenticated) return;
     if (selectedCustomer) {
-      storeService.getMeasurementsByCustomerId(selectedCustomer.id).then(setMeasurements);
-      storeService.getCustomerImages(selectedCustomer.id).then(setCustomerImages);
+      storeService.getMeasurementsByCustomerId(selectedCustomer.id).then(list => setMeasurements(dedupeById(list)));
+      storeService.getCustomerImages(selectedCustomer.id).then(list => setCustomerImages(dedupeById(list)));
     } else {
       // Load all measurements across boutique
       Promise.all(
         customers.map(c => storeService.getMeasurementsByCustomerId(c.id))
       ).then(results => {
-        setMeasurements(results.flat());
+        setMeasurements(dedupeById(results.flat()));
       });
     }
-  }, [selectedCustomer, customers]);
+  }, [selectedCustomer, customers, isAuthenticated]);
 
   if (authLoading) {
     return (
@@ -188,25 +272,34 @@ function MainApp() {
     return <LoginView />;
   }
 
-  // Action Handlers
+  // Action Handlers with Role Permission Checks
   const handleSaveCustomer = async (data: any) => {
     if (editingCustomer) {
+      if (!hasPermission('customerEdit')) {
+        throw new Error('权限不足：当前角色无权修改客户资料');
+      }
       const updated = await storeService.updateCustomer(editingCustomer.id, data);
-      setCustomers(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+      setCustomers(prev => dedupeById(prev.map(c => (c.id === updated.id ? updated : c))));
       if (selectedCustomer?.id === updated.id) setSelectedCustomer(updated);
     } else {
+      if (!hasPermission('customerCreate')) {
+        throw new Error('权限不足：当前角色无权新增客户档案');
+      }
       const created = await storeService.createCustomer(data);
-      setCustomers(prev => [created, ...prev]);
+      setCustomers(prev => dedupeById([created, ...prev]));
       setSelectedCustomer(created);
     }
   };
 
   const handleSaveMeasurement = async (data: any) => {
+    if (!hasPermission('measurementCreate')) {
+      throw new Error('权限不足：当前角色无权新增量体记录');
+    }
     const created = await storeService.createMeasurement(data);
-    setMeasurements(prev => [created, ...prev]);
+    setMeasurements(prev => dedupeById([created, ...prev]));
     // Refresh customers list because lastMeasurementDate updated
     const refreshed = await storeService.getCustomers();
-    setCustomers(refreshed);
+    setCustomers(dedupeById(refreshed));
     if (selectedCustomer?.id === data.customerId) {
       const updatedCust = refreshed.find(c => c.id === data.customerId);
       if (updatedCust) setSelectedCustomer(updatedCust);
@@ -215,21 +308,25 @@ function MainApp() {
 
   const handleSetCurrentMeasurement = async (measurementId: string) => {
     if (!selectedCustomer) return;
+    if (!hasPermission('measurementEdit')) return;
     await storeService.setCurrentMeasurement(measurementId, selectedCustomer.id);
     const updated = await storeService.getMeasurementsByCustomerId(selectedCustomer.id);
-    setMeasurements(updated);
+    setMeasurements(dedupeById(updated));
   };
 
   const handleCreateOrder = async (orderPayload: any) => {
+    if (!hasPermission('orderCreate')) {
+      throw new Error('权限不足：当前角色无权创建定制订单');
+    }
     const created = await storeService.createOrder(orderPayload);
-    setOrders(prev => [created, ...prev]);
+    setOrders(prev => dedupeById([created, ...prev]));
     // Refresh customers and wallet transactions
     const [refreshedCust, refreshedTxs] = await Promise.all([
       storeService.getCustomers(),
       storeService.getWalletTransactions(),
     ]);
-    setCustomers(refreshedCust);
-    setWalletTransactions(refreshedTxs);
+    setCustomers(dedupeById(refreshedCust));
+    setWalletTransactions(dedupeById(refreshedTxs));
     if (selectedCustomer?.id === orderPayload.customerId) {
       const currentCust = refreshedCust.find(c => c.id === orderPayload.customerId);
       if (currentCust) setSelectedCustomer(currentCust);
@@ -248,8 +345,8 @@ function MainApp() {
             beforeQuantity: mat.stockQuantity,
             afterQuantity: Math.max(0, mat.stockQuantity - usedMeters),
             relatedOrderId: created.orderId,
-            operatorId: 'staff-01',
-            operatorName: '裁缝师',
+            operatorId: currentUser?.uid || 'staff-01',
+            operatorName: currentUser?.displayName || '裁缝师',
             remarks: `定制订单 ${created.orderId} 裁剪消耗`,
           });
         }
@@ -257,13 +354,14 @@ function MainApp() {
     }
     const refreshedMats = await storeService.getMaterials();
     const refreshedInvTxs = await storeService.getInventoryTransactions();
-    setMaterials(refreshedMats);
-    setInventoryTransactions(refreshedInvTxs);
+    setMaterials(dedupeById(refreshedMats));
+    setInventoryTransactions(dedupeById(refreshedInvTxs));
   };
 
   const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus, note: string) => {
+    if (!hasPermission('orderEdit')) return;
     const updated = await storeService.updateOrderStatus(orderId, status, note);
-    setOrders(prev => prev.map(o => (o.id === updated.id ? updated : o)));
+    setOrders(prev => dedupeById(prev.map(o => (o.id === updated.id ? updated : o))));
     if (selectedOrder?.id === updated.id) setSelectedOrder(updated);
   };
 
@@ -274,8 +372,9 @@ function MainApp() {
     stage: PaymentStage,
     remarks?: string
   ) => {
+    if (!hasPermission('orderEdit')) return;
     const updated = await storeService.addOrderPayment(orderId, amountCents, method, stage, remarks);
-    setOrders(prev => prev.map(o => (o.id === updated.id ? updated : o)));
+    setOrders(prev => dedupeById(prev.map(o => (o.id === updated.id ? updated : o))));
     if (selectedOrder?.id === updated.id) setSelectedOrder(updated);
 
     // Refresh customers and transactions
@@ -283,8 +382,8 @@ function MainApp() {
       storeService.getCustomers(),
       storeService.getWalletTransactions(),
     ]);
-    setCustomers(refreshedCust);
-    setWalletTransactions(refreshedTxs);
+    setCustomers(dedupeById(refreshedCust));
+    setWalletTransactions(dedupeById(refreshedTxs));
   };
 
   const handleRecharge = async (
@@ -293,10 +392,13 @@ function MainApp() {
     method: PaymentMethod,
     remarks: string
   ) => {
+    if (!hasPermission('walletRecharge')) {
+      throw new Error('权限不足：当前角色无权办理储值充值');
+    }
     const tx = await storeService.rechargeWallet(customerId, amountCents, method, remarks);
-    setWalletTransactions(prev => [tx, ...prev]);
+    setWalletTransactions(prev => dedupeById([tx, ...prev]));
     const refreshed = await storeService.getCustomers();
-    setCustomers(refreshed);
+    setCustomers(dedupeById(refreshed));
     if (selectedCustomer?.id === customerId) {
       const currentCust = refreshed.find(c => c.id === customerId);
       if (currentCust) setSelectedCustomer(currentCust);
@@ -309,10 +411,13 @@ function MainApp() {
     relatedOrderId: string,
     remarks: string
   ) => {
+    if (!hasPermission('walletRefund')) {
+      throw new Error('权限不足：仅授权角色可执行储值退款冲正操作');
+    }
     const tx = await storeService.refundWallet(customerId, amountCents, relatedOrderId, remarks);
-    setWalletTransactions(prev => [tx, ...prev]);
+    setWalletTransactions(prev => dedupeById([tx, ...prev]));
     const refreshed = await storeService.getCustomers();
-    setCustomers(refreshed);
+    setCustomers(dedupeById(refreshed));
     if (selectedCustomer?.id === customerId) {
       const currentCust = refreshed.find(c => c.id === customerId);
       if (currentCust) setSelectedCustomer(currentCust);
@@ -320,15 +425,21 @@ function MainApp() {
   };
 
   const handleInventoryTransaction = async (data: any) => {
+    if (!hasPermission('materialEdit')) {
+      throw new Error('权限不足：当前角色无权执行面料出入库操作');
+    }
     const tx = await storeService.createInventoryTransaction(data);
-    setInventoryTransactions(prev => [tx, ...prev]);
+    setInventoryTransactions(prev => dedupeById([tx, ...prev]));
     const refreshedMats = await storeService.getMaterials();
-    setMaterials(refreshedMats);
+    setMaterials(dedupeById(refreshedMats));
   };
 
   const handleUploadArchive = async (data: any) => {
+    if (!hasPermission('archiveUpload')) {
+      throw new Error('权限不足：当前角色无权上传客户历史档案');
+    }
     const created = await storeService.createCustomerFile(data);
-    setCustomerFiles(prev => [created, ...prev]);
+    setCustomerFiles(prev => dedupeById([created, ...prev]));
   };
 
   const handleAddImage = async (
@@ -338,35 +449,140 @@ function MainApp() {
     title: string,
     remarks: string
   ) => {
+    if (!hasPermission('archiveUpload')) return;
     const created = await storeService.createCustomerImage({
       customerId,
       imageType,
       imageUrl,
       title,
       remarks,
-      operatorId: 'staff-01',
+      operatorId: currentUser?.uid || 'staff-01',
     });
-    setCustomerImages(prev => [created, ...prev]);
+    setCustomerImages(prev => dedupeById([created, ...prev]));
   };
 
-  const handleDeleteCustomerFile = async (fileId: string) => {
-    if (!window.confirm('确定要删除此份历史档案吗？此操作不可恢复。')) return;
-    await storeService.deleteCustomerFile(fileId);
-    setCustomerFiles(prev => prev.filter(f => f.id !== fileId));
+  const handleDeleteCustomer = (customer: Customer) => {
+    setDeleteDialog({
+      isOpen: true,
+      title: `确认删除客户「${customer.name}」`,
+      description: `删除客户（编号：${customer.customerId}，手机：${customer.phone}）将同时清理其关联的量体记录、历史订单及档案附件，且不可恢复。确定要删除吗？`,
+      confirmLabel: '确认删除客户',
+      onConfirm: async () => {
+        await storeService.deleteCustomer(customer.id);
+        setCustomers(prev => prev.filter(c => c.id !== customer.id));
+        setOrders(prev => prev.filter(o => o.customerId !== customer.id));
+        setMeasurements(prev => prev.filter(m => m.customerId !== customer.id));
+        setCustomerFiles(prev => prev.filter(f => f.customerId !== customer.id));
+        setCustomerImages(prev => prev.filter(img => img.customerId !== customer.id));
+        if (selectedCustomer?.id === customer.id) {
+          setSelectedCustomer(null);
+        }
+      },
+    });
   };
 
-  const handleDeleteCustomerImage = async (imageId: string) => {
-    if (!window.confirm('确定要删除此张照片吗？')) return;
-    await storeService.deleteCustomerImage(imageId);
-    setCustomerImages(prev => prev.filter(i => i.id !== imageId));
+  const handleDeleteOrder = (order: Order) => {
+    setDeleteDialog({
+      isOpen: true,
+      title: `确认删除订单 #${order.orderId}`,
+      description: `即将删除客户「${order.customerName}」的定制订单（金额：¥${(order.finalAmount / 100).toFixed(2)}）。删除后会自动重算该客户的订单统计数据。确定要删除此订单吗？`,
+      confirmLabel: '确认删除订单',
+      onConfirm: async () => {
+        await storeService.deleteOrder(order.id);
+        setOrders(prev => prev.filter(o => o.id !== order.id));
+        if (selectedOrder?.id === order.id) {
+          setIsOrderDetailOpen(false);
+          setSelectedOrder(null);
+        }
+        const refreshedCust = await storeService.getCustomers();
+        setCustomers(dedupeById(refreshedCust));
+        if (selectedCustomer?.id === order.customerId) {
+          const updatedCust = refreshedCust.find(c => c.id === order.customerId);
+          if (updatedCust) setSelectedCustomer(updatedCust);
+        }
+      },
+    });
+  };
+
+  const handleDeleteMaterial = (material: Material) => {
+    setDeleteDialog({
+      isOpen: true,
+      title: `确认删除面料「${material.name}」`,
+      description: `即将从面料台账中删除面料（编号：${material.materialCode}，品牌：${material.brand || '工坊甄选'}）。此操作不可恢复，确定要删除吗？`,
+      confirmLabel: '确认删除面料',
+      onConfirm: async () => {
+        await storeService.deleteMaterial(material.id);
+        setMaterials(prev => prev.filter(m => m.id !== material.id));
+      },
+    });
+  };
+
+  const handleDeleteStyle = (style: Style) => {
+    setDeleteDialog({
+      isOpen: true,
+      title: `确认删除款式「${style.name}」`,
+      description: `即将从定制款式库中删除「${style.name}」（品类：${style.category}）。此操作不可恢复，确定要删除吗？`,
+      confirmLabel: '确认删除款式',
+      onConfirm: async () => {
+        await storeService.deleteStyle(style.id);
+        setStyles(prev => prev.filter(s => s.id !== style.id));
+      },
+    });
+  };
+
+  const handleDeleteMeasurement = (measurement: Measurement) => {
+    setDeleteDialog({
+      isOpen: true,
+      title: `确认删除量体记录 #${measurement.measurementId}`,
+      description: `即将删除客户「${measurement.customerName || ''}」于 ${measurement.measureDate} 的量体记录。若该记录为当前生效数据，系统将自动顺延最新一份量体记录为当前生效。`,
+      confirmLabel: '确认删除量体单',
+      onConfirm: async () => {
+        await storeService.deleteMeasurement(measurement.id);
+        setMeasurements(prev => prev.filter(m => m.id !== measurement.id));
+        if (selectedCustomer) {
+          const updatedList = await storeService.getMeasurementsByCustomerId(selectedCustomer.id);
+          setMeasurements(dedupeById(updatedList));
+        }
+      },
+    });
+  };
+
+  const handleDeleteCustomerFile = (file: CustomerFile) => {
+    setDeleteDialog({
+      isOpen: true,
+      title: `确认删除历史档案「${file.fileName}」`,
+      description: `即将删除客户「${file.customerName || ''}」的 ${file.year} 年历史档案文件及其云端存储数据。此操作不可恢复，确定要删除吗？`,
+      confirmLabel: '确认删除档案',
+      onConfirm: async () => {
+        await storeService.deleteCustomerFile(file.id);
+        setCustomerFiles(prev => prev.filter(f => f.id !== file.id));
+      },
+    });
+  };
+
+  const handleDeleteCustomerImage = (image: CustomerImage) => {
+    setDeleteDialog({
+      isOpen: true,
+      title: `确认删除照片「${image.title}」`,
+      description: `即将从客户影像记录中删除此张照片。此操作不可恢复，确定要删除吗？`,
+      confirmLabel: '确认删除照片',
+      onConfirm: async () => {
+        await storeService.deleteCustomerImage(image.id);
+        setCustomerImages(prev => prev.filter(i => i.id !== image.id));
+      },
+    });
   };
 
   const handleUpdateMaterial = async (id: string, updates: Partial<Material>) => {
+    if (!hasPermission('materialEdit')) return;
     const updated = await storeService.updateMaterial(id, updates);
     setMaterials(prev => prev.map(m => (m.id === updated.id ? updated : m)));
   };
 
   const handleUpdateSettings = async (newSettings: Partial<StoreSetting>) => {
+    if (!hasPermission('settingsManage')) {
+      throw new Error('权限不足：当前角色无权修改系统设置');
+    }
     const updated = await storeService.updateSettings(newSettings);
     setSettings(updated);
   };
@@ -502,6 +718,9 @@ function MainApp() {
               }}
               onSetCurrentMeasurement={handleSetCurrentMeasurement}
               onAddImage={handleAddImage}
+              onDeleteCustomer={handleDeleteCustomer}
+              onDeleteOrder={handleDeleteOrder}
+              onDeleteMeasurement={handleDeleteMeasurement}
               onDeleteFile={handleDeleteCustomerFile}
               onDeleteImage={handleDeleteCustomerImage}
             />
@@ -549,6 +768,7 @@ function MainApp() {
                     setEditingCustomer(null);
                     setIsCustomerModalOpen(true);
                   }}
+                  onDeleteCustomer={handleDeleteCustomer}
                 />
               )}
 
@@ -566,6 +786,7 @@ function MainApp() {
                     setPrintingCustomer(c);
                     setIsMeasurementPrintOpen(true);
                   }}
+                  onDeleteMeasurement={handleDeleteMeasurement}
                 />
               )}
 
@@ -584,6 +805,7 @@ function MainApp() {
                     setPrintingOrder(o);
                     setIsOrderPrintOpen(true);
                   }}
+                  onDeleteOrder={handleDeleteOrder}
                 />
               )}
 
@@ -597,6 +819,7 @@ function MainApp() {
                     setIsInventoryModalOpen(true);
                   }}
                   onUpdateMaterial={handleUpdateMaterial}
+                  onDeleteMaterial={handleDeleteMaterial}
                 />
               )}
 
@@ -604,6 +827,7 @@ function MainApp() {
                 <StylesView
                   styles={styles}
                   onOpenCreateStyle={() => setIsCreateStyleOpen(true)}
+                  onDeleteStyle={handleDeleteStyle}
                 />
               )}
 
@@ -633,6 +857,7 @@ function MainApp() {
                     setIsPdfPreviewOpen(true);
                   }}
                   onSelectCustomer={c => setSelectedCustomer(c)}
+                  onDeleteFile={handleDeleteCustomerFile}
                 />
               )}
 
@@ -648,6 +873,7 @@ function MainApp() {
               {currentNav === 'settings' && (
                 <SettingsView
                   settings={settings}
+                  customers={customers}
                   onUpdateSettings={handleUpdateSettings}
                   onResetSeedData={handleResetSeedData}
                   onExportBackup={handleExportBackup}
@@ -709,6 +935,7 @@ function MainApp() {
             setPrintingOrder(o);
             setIsOrderPrintOpen(true);
           }}
+          onDeleteOrder={handleDeleteOrder}
         />
       )}
 
@@ -773,7 +1000,7 @@ function MainApp() {
         onClose={() => setIsCreateMaterialOpen(false)}
         onSave={async data => {
           const created = await storeService.createMaterial(data);
-          setMaterials(prev => [created, ...prev]);
+          setMaterials(prev => dedupeById([created, ...prev]));
         }}
       />
 
@@ -782,9 +1009,20 @@ function MainApp() {
         onClose={() => setIsCreateStyleOpen(false)}
         onSave={async data => {
           const created = await storeService.createStyle(data);
-          setStyles(prev => [created, ...prev]);
+          setStyles(prev => dedupeById([created, ...prev]));
         }}
       />
+
+      {deleteDialog && (
+        <ConfirmDeleteModal
+          isOpen={deleteDialog.isOpen}
+          title={deleteDialog.title}
+          description={deleteDialog.description}
+          confirmLabel={deleteDialog.confirmLabel}
+          onClose={() => setDeleteDialog(null)}
+          onConfirm={deleteDialog.onConfirm}
+        />
+      )}
 
       {/* Mobile Quick Bottom Navigation Bar for iPhone / iPad */}
       <nav

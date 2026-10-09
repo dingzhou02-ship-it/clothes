@@ -24,6 +24,8 @@ import {
 } from 'lucide-react';
 import { CustomerFile, CustomerImage, Customer, Measurement, Order, WalletTransaction } from '../../types';
 import { storageService } from '../../services/storageService';
+import { ArchiveFileCardPreview } from '../common/ArchiveFileCardPreview';
+import { ResolvedImage } from '../common/ResolvedImage';
 import {
   formatMoney,
   formatDate,
@@ -42,6 +44,7 @@ interface CustomerDetailViewProps {
   images: CustomerImage[];
   onBack: () => void;
   onEditCustomer: (customer: Customer) => void;
+  onDeleteCustomer?: (customer: Customer) => void;
   onOpenCreateOrder: (customer: Customer) => void;
   onOpenAddMeasurement: (customer: Customer) => void;
   onOpenRecharge: (customer: Customer) => void;
@@ -49,11 +52,13 @@ interface CustomerDetailViewProps {
   onOpenPrintMeasurement: (measurement: Measurement) => void;
   onOpenPrintOrder: (order: Order) => void;
   onSelectOrder: (order: Order) => void;
+  onDeleteOrder?: (order: Order) => void;
+  onDeleteMeasurement?: (measurement: Measurement) => void;
   onOpenPdfPreview: (file: CustomerFile) => void;
   onSetCurrentMeasurement: (measurementId: string) => Promise<void>;
   onAddImage: (customerId: string, imageType: any, imageUrl: string, title: string, remarks: string) => Promise<void>;
-  onDeleteFile?: (fileId: string) => Promise<void>;
-  onDeleteImage?: (imageId: string) => Promise<void>;
+  onDeleteFile?: (file: CustomerFile) => void;
+  onDeleteImage?: (image: CustomerImage) => void;
 }
 
 export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
@@ -65,6 +70,7 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
   images,
   onBack,
   onEditCustomer,
+  onDeleteCustomer,
   onOpenCreateOrder,
   onOpenAddMeasurement,
   onOpenRecharge,
@@ -72,6 +78,8 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
   onOpenPrintMeasurement,
   onOpenPrintOrder,
   onSelectOrder,
+  onDeleteOrder,
+  onDeleteMeasurement,
   onOpenPdfPreview,
   onSetCurrentMeasurement,
   onAddImage,
@@ -204,6 +212,18 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
                 <ImageIcon className="w-3.5 h-3.5 text-rose-600" />
                 <span>上传照片</span>
               </button>
+
+              {onDeleteCustomer && (
+                <button
+                  type="button"
+                  onClick={() => onDeleteCustomer(customer)}
+                  className="px-3 py-2 bg-rose-50 hover:bg-rose-600 text-rose-600 hover:text-white border border-rose-200 hover:border-rose-600 text-xs font-semibold rounded-xl flex items-center space-x-1 transition-all cursor-pointer"
+                  title="删除该客户档案"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>删除客户</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -245,13 +265,25 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
           <div className="md:col-span-2 bg-white rounded-2xl border border-stone-200 p-6 space-y-6 shadow-xs">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <h3 className="text-sm font-bold text-stone-900">客户完整档案信息</h3>
-              <button
-                onClick={() => onEditCustomer(customer)}
-                className="text-xs text-amber-800 hover:underline flex items-center space-x-1 cursor-pointer font-medium"
-              >
-                <Edit2 className="w-3.5 h-3.5" />
-                <span>编辑客户资料</span>
-              </button>
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => onEditCustomer(customer)}
+                  className="text-xs text-amber-800 hover:underline flex items-center space-x-1 cursor-pointer font-medium"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  <span>编辑客户资料</span>
+                </button>
+                {onDeleteCustomer && (
+                  <button
+                    type="button"
+                    onClick={() => onDeleteCustomer(customer)}
+                    className="text-xs text-rose-600 hover:underline flex items-center space-x-1 cursor-pointer font-medium"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>删除客户</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4 text-xs">
@@ -345,6 +377,83 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Direct Inline Image View of Uploaded Archives in Customer Profile */}
+          {files.length > 0 && (
+            <div className="md:col-span-3 bg-white rounded-2xl border border-stone-200 p-6 space-y-4 shadow-xs">
+              <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-stone-900 flex items-center space-x-2">
+                    <FileText className="w-4 h-4 text-indigo-600" />
+                    <span>客户已上传历史档案图片直览 ({files.length} 份)</span>
+                  </h3>
+                  <p className="text-xs text-stone-400 mt-0.5">
+                    上传的档案直接以图片形式完整呈现，无需点进内层即可直接查阅
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onOpenUploadArchive(customer)}
+                  className="px-3 py-1.5 bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold rounded-xl flex items-center space-x-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5 text-amber-400" />
+                  <span>继续上传档案</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                {files.map(file => (
+                  <div
+                    key={file.id}
+                    className="rounded-xl border border-stone-200 p-4 bg-stone-50/40 space-y-3 flex flex-col justify-between"
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center space-x-2 min-w-0">
+                          <span className="text-[11px] font-bold bg-stone-900 text-amber-400 px-2 py-0.5 rounded-md font-mono shrink-0">
+                            {file.year}年度
+                          </span>
+                          <h4 className="text-xs font-bold text-stone-900 truncate">{file.fileName}</h4>
+                        </div>
+                        <div className="flex items-center space-x-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => storageService.downloadFile(file.fileUrl, file.fileName, file.chunkCount)}
+                            className="px-2 py-1 text-[11px] bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 rounded-lg flex items-center space-x-1 cursor-pointer"
+                          >
+                            <Download className="w-3 h-3" />
+                            <span>下载</span>
+                          </button>
+                          {onDeleteFile && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteFile(file)}
+                              className="p-1 text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 rounded-lg cursor-pointer transition-colors"
+                              title="删除该份档案"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <ArchiveFileCardPreview
+                        file={file}
+                        onOpenFullPreview={onOpenPdfPreview}
+                        maxHeightClass="max-h-[480px]"
+                      />
+
+                      {file.remarks && (
+                        <p className="text-xs text-stone-600 bg-white p-2 rounded-lg border border-stone-200/80">
+                          <strong>备注：</strong> {file.remarks}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -420,6 +529,16 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
                         <Printer className="w-3.5 h-3.5" />
                         <span>A4打印量体单</span>
                       </button>
+                      {onDeleteMeasurement && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteMeasurement(m)}
+                          className="p-1.5 text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg transition-colors cursor-pointer"
+                          title="删除该条量体记录"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -542,16 +661,31 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
                         <p className="text-xs font-semibold text-emerald-600">全部款项已结清</p>
                       )}
                     </div>
-                    <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        onOpenPrintOrder(o);
-                      }}
-                      className="p-2 text-stone-500 hover:text-stone-900 hover:bg-stone-100 rounded-lg transition-colors cursor-pointer"
-                      title="打印A4单据"
-                    >
-                      <Printer className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          onOpenPrintOrder(o);
+                        }}
+                        className="p-2 text-stone-500 hover:text-stone-900 hover:bg-stone-100 rounded-lg transition-colors cursor-pointer"
+                        title="打印A4单据"
+                      >
+                        <Printer className="w-4 h-4" />
+                      </button>
+                      {onDeleteOrder && (
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            onDeleteOrder(o);
+                          }}
+                          className="p-2 text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg transition-colors cursor-pointer"
+                          title="删除该订单"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -693,15 +827,8 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
               <p className="text-xs text-stone-500">该年份暂无扫描归档文件</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               {filteredFiles.map(file => {
-                const lowerName = file.fileName.toLowerCase();
-                const isImg =
-                  lowerName.endsWith('.jpg') ||
-                  lowerName.endsWith('.jpeg') ||
-                  lowerName.endsWith('.png') ||
-                  lowerName.endsWith('.webp') ||
-                  file.fileUrl.startsWith('data:image/');
                 const formatArchiveSize = (bytes?: number) => {
                   if (!bytes) return '未知大小';
                   if (bytes < 1024) return `${bytes} B`;
@@ -712,55 +839,72 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
                 return (
                   <div
                     key={file.id}
-                    className="bg-white rounded-xl border border-stone-200 p-4 hover:border-stone-400 transition-colors shadow-xs space-y-3"
+                    className="bg-white rounded-2xl border border-stone-200 p-4 sm:p-5 hover:border-stone-400 transition-colors shadow-xs space-y-3.5 flex flex-col justify-between"
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-2.5 min-w-0">
-                        <div className={`p-2 rounded-lg shrink-0 ${isImg ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
-                          {isImg ? <ImageIcon className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
-                        </div>
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <h4 className="text-xs font-bold text-stone-900 truncate">{file.fileName}</h4>
-                          <p className="text-[11px] text-stone-400">
-                            {file.year}年度 · {file.fileType === 'historical_order' ? '历史纸质订单' : file.fileType === 'historical_measurement' ? '历史手写量体单' : '客户档案文件'} ({isImg ? '照片' : 'PDF文档'}) · {formatArchiveSize(file.fileSize)}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                            <span className="text-[11px] font-bold bg-stone-900 text-amber-400 px-2 py-0.5 rounded-md font-mono">
+                              {file.year}年度
+                            </span>
+                            <span className="text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-200 px-2 py-0.5 rounded-md">
+                              {file.fileType === 'historical_order'
+                                ? '历史纸质订单'
+                                : file.fileType === 'historical_measurement'
+                                ? '历史手写量体单'
+                                : '客户档案文件'}
+                            </span>
+                            <span className="text-[11px] text-stone-400 font-mono">
+                              {formatArchiveSize(file.fileSize)}
+                            </span>
+                          </div>
+                          <h4 className="text-sm font-bold text-stone-900 break-all">{file.fileName}</h4>
                         </div>
                       </div>
+
+                      {/* Direct Image Presentation without needing to click in */}
+                      <ArchiveFileCardPreview
+                        file={file}
+                        onOpenFullPreview={onOpenPdfPreview}
+                        maxHeightClass="max-h-[540px]"
+                      />
+
+                      {file.remarks && (
+                        <p className="text-xs text-stone-700 bg-amber-50/40 p-2.5 rounded-xl border border-amber-100">
+                          <strong>老单手记：</strong> {file.remarks}
+                        </p>
+                      )}
                     </div>
 
-                    {file.remarks && (
-                      <p className="text-xs text-stone-600 bg-stone-50 p-2 rounded-lg">
-                        {file.remarks}
-                      </p>
-                    )}
-
-                    <div className="flex items-center justify-between pt-2 border-t border-stone-100 text-xs">
-                      <span className="text-stone-400 text-[11px]">{formatDate(file.createdAt)}</span>
+                    <div className="flex items-center justify-between pt-3 border-t border-stone-100 text-xs">
+                      <span className="text-stone-400 text-[11px] font-mono">上传于 {formatDate(file.createdAt)}</span>
                       <div className="flex items-center space-x-2">
                         <button
-                          onClick={() => onOpenPdfPreview(file)}
-                          className="px-2.5 py-1 text-xs bg-stone-900 hover:bg-stone-800 text-white rounded-md flex items-center space-x-1 cursor-pointer"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>在线查看</span>
-                        </button>
-                        <a
-                          href={file.fileUrl}
-                          download={file.fileName}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-2.5 py-1 text-xs bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-md flex items-center space-x-1 cursor-pointer"
+                          type="button"
+                          onClick={() => storageService.downloadFile(file.fileUrl, file.fileName, file.chunkCount)}
+                          className="px-2.5 py-1 text-xs bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-lg flex items-center space-x-1 cursor-pointer"
                         >
                           <Download className="w-3.5 h-3.5" />
                           <span>下载</span>
-                        </a>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onOpenPdfPreview(file)}
+                          className="px-2.5 py-1 text-xs bg-stone-900 hover:bg-stone-800 text-white rounded-lg flex items-center space-x-1 cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>全屏大图</span>
+                        </button>
                         {onDeleteFile && (
                           <button
-                            onClick={() => onDeleteFile(file.id)}
-                            className="p-1 text-stone-400 hover:text-rose-600 rounded-md cursor-pointer transition-colors"
+                            type="button"
+                            onClick={() => onDeleteFile(file)}
+                            className="px-2 py-1 text-xs text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg flex items-center space-x-1 cursor-pointer transition-colors"
                             title="删除该份归档"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
+                            <span>删除</span>
                           </button>
                         )}
                       </div>
@@ -798,11 +942,13 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               {images.map(img => (
                 <div key={img.id} className="bg-white rounded-xl border border-stone-200 overflow-hidden shadow-xs space-y-2">
-                  <div className="h-60 bg-stone-100 overflow-hidden relative">
-                    <img
+                  <div className="h-72 bg-stone-900/95 overflow-hidden relative flex items-center justify-center">
+                    <ResolvedImage
                       src={img.imageUrl}
+                      chunkCount={img.chunkCount}
                       alt={img.title}
-                      className="w-full h-full object-cover object-top hover:scale-105 transition-transform duration-300"
+                      className="w-full h-full object-contain hover:scale-105 transition-transform duration-300"
+                      fallbackText="图片加载失败"
                     />
                     <span className="absolute top-2 left-2 bg-stone-900/80 text-white text-[10px] px-2 py-0.5 rounded-md font-medium backdrop-blur-xs">
                       {img.imageType === 'front' ? '正面' : img.imageType === 'side' ? '侧面' : img.imageType === 'back' ? '背面' : '成衣实拍'}
@@ -816,11 +962,13 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
                     </div>
                     {onDeleteImage && (
                       <button
-                        onClick={() => onDeleteImage(img.id)}
-                        className="p-1 text-stone-400 hover:text-rose-600 rounded-lg cursor-pointer transition-colors"
+                        type="button"
+                        onClick={() => onDeleteImage(img)}
+                        className="px-2 py-1 text-xs text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg cursor-pointer transition-colors inline-flex items-center space-x-1"
                         title="删除该照片"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
+                        <span>删除</span>
                       </button>
                     )}
                   </div>
@@ -865,7 +1013,7 @@ export const CustomerDetailView: React.FC<CustomerDetailViewProps> = ({
                       />
                       {newImgUrl ? (
                         <div className="flex items-center space-x-3 w-full">
-                          <img src={newImgUrl} alt="预览" className="w-12 h-12 object-cover rounded-lg border border-stone-300" />
+                          <ResolvedImage src={newImgUrl} alt="预览" className="w-12 h-12 object-cover rounded-lg border border-stone-300" />
                           <span className="text-xs text-emerald-700 font-bold flex items-center space-x-1">
                             <CheckCircle2 className="w-4 h-4" />
                             <span>照片已选取并准备就绪</span>

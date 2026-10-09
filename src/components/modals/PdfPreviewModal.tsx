@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { X, Download, Printer, ZoomIn, ZoomOut, FileText, Image as ImageIcon, ExternalLink, RotateCw } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Download, ZoomIn, ZoomOut, FileText, Image as ImageIcon, ExternalLink, RotateCw, Loader2, AlertCircle } from 'lucide-react';
 import { CustomerFile } from '../../types';
 import { formatDate } from '../../utils/formatters';
+import { storageService } from '../../services/storageService';
 
 interface PdfPreviewModalProps {
   isOpen: boolean;
@@ -16,6 +17,44 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
 }) => {
   const [zoomLevel, setZoomLevel] = useState(100);
   const [rotation, setRotation] = useState(0);
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  const [loadingUrl, setLoadingUrl] = useState(false);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    if (isOpen && file) {
+      setZoomLevel(100);
+      setRotation(0);
+      setLoadError('');
+      setResolvedUrl(null);
+      setLoadingUrl(true);
+      storageService
+        .resolveFileUrl(file.fileUrl, file.chunkCount)
+        .then(url => {
+          if (active) {
+            if (url && url.trim().length > 0) {
+              setResolvedUrl(url);
+            } else {
+              setLoadError('未能获取到有效的档案预览地址');
+            }
+            setLoadingUrl(false);
+          }
+        })
+        .catch((err: any) => {
+          if (active) {
+            setLoadError(err?.message || '读取云端档案失败，请稍后重试');
+            setLoadingUrl(false);
+          }
+        });
+    } else {
+      setResolvedUrl(null);
+      setLoadingUrl(false);
+    }
+    return () => {
+      active = false;
+    };
+  }, [isOpen, file]);
 
   if (!isOpen || !file) return null;
 
@@ -25,10 +64,12 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
     lowerName.endsWith('.jpeg') ||
     lowerName.endsWith('.png') ||
     lowerName.endsWith('.webp') ||
+    file.mimeType?.startsWith('image/') ||
     file.fileUrl.startsWith('data:image/');
 
   const isPdf =
     lowerName.endsWith('.pdf') ||
+    file.mimeType === 'application/pdf' ||
     file.fileUrl.startsWith('data:application/pdf') ||
     (!isImage && file.fileType === 'historical_order');
 
@@ -39,13 +80,12 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   };
 
-  const handleDownload = () => {
-    const link = document.createElement('a');
-    link.href = file.fileUrl;
-    link.download = file.fileName || '档案文件';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleDownload = async () => {
+    try {
+      await storageService.downloadFile(file.fileUrl, file.fileName, file.chunkCount);
+    } catch (err: any) {
+      setLoadError(err?.message || '下载档案失败');
+    }
   };
 
   return (
@@ -106,15 +146,17 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
               <span className="hidden sm:inline">下载</span>
             </button>
 
-            <a
-              href={file.fileUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="p-1.5 hover:bg-stone-800 rounded-lg text-stone-300 hover:text-white transition-colors cursor-pointer"
-              title="新窗口全屏打开"
-            >
-              <ExternalLink className="w-4 h-4" />
-            </a>
+            {resolvedUrl && (
+              <a
+                href={resolvedUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="p-1.5 hover:bg-stone-800 rounded-lg text-stone-300 hover:text-white transition-colors cursor-pointer"
+                title="新窗口全屏打开"
+              >
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            )}
 
             <button
               onClick={onClose}
@@ -127,10 +169,20 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
 
         {/* File Content Area */}
         <div className="flex-1 bg-stone-900/90 overflow-auto p-2 sm:p-6 flex items-center justify-center relative">
-          {isImage ? (
+          {loadingUrl || (!resolvedUrl && !loadError) ? (
+            <div className="text-center text-stone-300 space-y-3">
+              <Loader2 className="w-8 h-8 animate-spin text-amber-400 mx-auto" />
+              <p className="text-xs font-mono">正在从云端安全存储加载并重组档案分片...</p>
+            </div>
+          ) : loadError ? (
+            <div className="text-center p-8 bg-stone-800 rounded-2xl max-w-md border border-rose-500/40 text-white space-y-3">
+              <AlertCircle className="w-10 h-10 text-rose-400 mx-auto" />
+              <p className="text-xs text-rose-200">{loadError}</p>
+            </div>
+          ) : isImage && resolvedUrl ? (
             <div className="w-full h-full flex items-center justify-center overflow-auto p-4">
               <img
-                src={file.fileUrl}
+                src={resolvedUrl}
                 alt={file.fileName}
                 style={{
                   transform: `scale(${zoomLevel / 100}) rotate(${rotation}deg)`,
@@ -140,10 +192,10 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
                 className="max-w-full max-h-full object-contain rounded-xl shadow-2xl border border-stone-800"
               />
             </div>
-          ) : isPdf ? (
+          ) : isPdf && resolvedUrl ? (
             <div className="w-full h-full flex flex-col bg-stone-950 rounded-xl overflow-hidden border border-stone-800">
               <iframe
-                src={file.fileUrl}
+                src={resolvedUrl}
                 title={file.fileName}
                 className="w-full h-full border-0 rounded-xl bg-white"
               />

@@ -10,6 +10,9 @@ import {
   CustomerFile,
   CustomerImage,
   StoreSetting,
+  RoleDefinition,
+  RolePermissions,
+  StaffUser,
 } from '../types';
 
 export const INITIAL_SETTINGS: StoreSetting = {
@@ -1004,3 +1007,102 @@ export const SEED_CUSTOMER_IMAGES: CustomerImage[] = [
     createdAt: '2026-09-15T16:15:00Z',
   },
 ];
+
+export const DEFAULT_ADMIN_PERMISSIONS: RolePermissions = {
+  customerView: true,
+  customerCreate: true,
+  customerEdit: true,
+  customerDelete: true,
+  measurementView: true,
+  measurementCreate: true,
+  measurementEdit: true,
+  measurementDelete: true,
+  orderView: true,
+  orderCreate: true,
+  orderEdit: true,
+  orderDelete: true,
+  materialView: true,
+  materialCreate: true,
+  materialEdit: true,
+  materialDelete: true,
+  archiveView: true,
+  archiveUpload: true,
+  archiveDownload: true,
+  archiveDelete: true,
+  walletView: true,
+  walletRecharge: true,
+  walletDeduct: true,
+  walletRefund: true,
+  settingsManage: true,
+  operatorManage: true,
+  roleManage: true,
+};
+
+export const DEFAULT_STAFF_PERMISSIONS: RolePermissions = {
+  customerView: true,
+  customerCreate: true,
+  customerEdit: true,
+  customerDelete: false,
+  measurementView: true,
+  measurementCreate: true,
+  measurementEdit: true,
+  measurementDelete: false,
+  orderView: true,
+  orderCreate: true,
+  orderEdit: true,
+  orderDelete: false,
+  materialView: true,
+  materialCreate: true,
+  materialEdit: true,
+  materialDelete: false,
+  archiveView: true,
+  archiveUpload: true,
+  archiveDownload: true,
+  archiveDelete: false,
+  walletView: true,
+  walletRecharge: false,
+  walletDeduct: true,
+  walletRefund: false,
+  settingsManage: false,
+  operatorManage: false,
+  roleManage: false,
+};
+
+export const SEED_ROLES: RoleDefinition[] = [
+  {
+    id: 'role-admin',
+    roleKey: 'admin',
+    name: '系统管理员 / 工坊主理人',
+    description: '拥有最高管理权限：可管理操作者账号、角色权限、系统设置、客户、订单、量体、面料、历史档案及储值资金操作。',
+    isSystem: true,
+    permissions: { ...DEFAULT_ADMIN_PERMISSIONS },
+    updatedAt: '2026-09-01T10:00:00Z',
+  },
+  {
+    id: 'role-staff',
+    roleKey: 'staff',
+    name: '普通操作员 / 制版量体师',
+    description: '日常业务操作权限：可进行客户建档、量体录入、定制开单、面料盘点及档案上传调阅，受限于系统参数修改、账号管理与资金冲正删除。',
+    isSystem: true,
+    permissions: { ...DEFAULT_STAFF_PERMISSIONS },
+    updatedAt: '2026-09-01T10:00:00Z',
+  },
+];
+
+export const SEED_OPERATORS: StaffUser[] = [
+  {
+    uid: 'staff-01',
+    email: 'dingzhou02@gmail.com',
+    displayName: '刘振海 (主理人/总裁缝师)',
+    phone: '138-0010-8888',
+    position: '工坊主理人 / 首席主裁',
+    role: 'admin',
+    roleId: 'role-admin',
+    roleName: '系统管理员 / 工坊主理人',
+    status: 'active',
+    createdAt: '2024-01-01T08:00:00Z',
+    lastLoginAt: '2026-10-08T10:00:00Z',
+    updatedAt: '2026-10-08T10:00:00Z',
+  },
+];
+

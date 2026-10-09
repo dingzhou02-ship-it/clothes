@@ -243,8 +243,24 @@ export interface CustomerFile {
   year: number; // e.g. 2024
   fileUrl: string;
   fileSize: number;
+  mimeType?: string;
+  storageMode?: 'firebase_storage' | 'firestore_chunks' | 'data_url' | 'external_url';
+  chunkCount?: number;
+  verifyStatus?: 'verified' | 'pending';
   operatorId: string;
+  operatorName?: string;
   remarks?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface FileChunk {
+  id: string;
+  fileId: string;
+  chunkIndex: number;
+  totalChunks: number;
+  data: string;
+  mimeType: string;
   createdAt: string;
 }
 
@@ -254,6 +270,9 @@ export interface CustomerImage {
   customerId: string;
   imageType: 'front' | 'side' | 'back' | 'finished' | 'other';
   imageUrl: string;
+  storageMode?: 'firebase_storage' | 'firestore_chunks' | 'data_url' | 'external_url';
+  chunkCount?: number;
+  fileId?: string;
   title: string;
   remarks?: string;
   operatorId: string;
@@ -271,6 +290,8 @@ export interface StoreSetting {
   defaultSafetyStock: number; // e.g. 10 (m)
   printHeader: string;
   printFooter: string;
+  updatedAt?: string;
+  version?: number;
 }
 
 export interface AuditLog {
@@ -283,12 +304,68 @@ export interface AuditLog {
   targetId: string;
   timestamp: string;
   details: string;
+  result?: 'success' | 'failure';
+}
+
+export interface RolePermissions {
+  // 客户资料权限
+  customerView: boolean;
+  customerCreate: boolean;
+  customerEdit: boolean;
+  customerDelete: boolean;
+  // 量体数据权限
+  measurementView: boolean;
+  measurementCreate: boolean;
+  measurementEdit: boolean;
+  measurementDelete: boolean;
+  // 订单权限
+  orderView: boolean;
+  orderCreate: boolean;
+  orderEdit: boolean;
+  orderDelete: boolean;
+  // 面料与库存权限
+  materialView: boolean;
+  materialCreate: boolean;
+  materialEdit: boolean;
+  materialDelete: boolean;
+  // 历史档案与照片权限
+  archiveView: boolean;
+  archiveUpload: boolean;
+  archiveDownload: boolean;
+  archiveDelete: boolean;
+  // 储值与资金权限
+  walletView: boolean;
+  walletRecharge: boolean;
+  walletDeduct: boolean;
+  walletRefund: boolean;
+  // 系统与账号管理权限
+  settingsManage: boolean;
+  operatorManage: boolean;
+  roleManage: boolean;
+}
+
+export interface RoleDefinition {
+  id: string;
+  roleKey: 'admin' | 'staff' | string;
+  name: string;
+  description: string;
+  isSystem?: boolean;
+  permissions: RolePermissions;
+  updatedAt: string;
 }
 
 export interface StaffUser {
   uid: string;
   email: string;
   displayName: string;
+  phone?: string;
+  avatarUrl?: string;
+  position?: string;
   role: 'admin' | 'staff';
+  roleId?: string;
+  roleName?: string;
   status: 'active' | 'inactive';
+  createdAt?: string;
+  lastLoginAt?: string;
+  updatedAt?: string;
 }

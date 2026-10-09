@@ -16,6 +16,7 @@ import {
 import { Material } from '../../types';
 import { formatMoney } from '../../utils/formatters';
 import { storageService } from '../../services/storageService';
+import { ResolvedImage } from '../common/ResolvedImage';
 
 interface MaterialDetailModalProps {
   isOpen: boolean;
@@ -23,6 +24,7 @@ interface MaterialDetailModalProps {
   material: Material | null;
   onUpdateMaterial: (materialId: string, updates: Partial<Material>) => Promise<void>;
   onOpenInventoryModal?: (material: Material) => void;
+  onDeleteMaterial?: (material: Material) => void;
 }
 
 export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
@@ -31,6 +33,7 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
   material,
   onUpdateMaterial,
   onOpenInventoryModal,
+  onDeleteMaterial,
 }) => {
   const [selectedImgIndex, setSelectedImgIndex] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -42,7 +45,7 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
 
   if (!isOpen || !material) return null;
 
-  const images = material.imageUrls || [];
+  const images = (material.imageUrls || []).filter(u => typeof u === 'string' && u.trim().length > 0);
   const currentImage = images[selectedImgIndex] || images[0] || '';
 
   const handleFileUpload = async (files: FileList | null) => {
@@ -148,7 +151,7 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
               <div className="relative aspect-4/3 sm:aspect-16/10 bg-stone-900 rounded-2xl overflow-hidden border border-stone-200 shadow-inner flex items-center justify-center group">
                 {currentImage ? (
                   <>
-                    <img
+                    <ResolvedImage
                       src={currentImage}
                       alt={material.name}
                       className="w-full h-full object-contain sm:object-cover"
@@ -243,7 +246,7 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
                         : 'border-stone-200 opacity-70 hover:opacity-100'
                     }`}
                   >
-                    <img src={url} alt={`缩略图 ${idx + 1}`} className="w-full h-full object-cover" />
+                    <ResolvedImage src={url} alt={`缩略图 ${idx + 1}`} className="w-full h-full object-cover" />
                     {idx === 0 && (
                       <span className="absolute bottom-0 inset-x-0 bg-stone-900/80 text-white text-[9px] text-center font-bold">
                         主图
@@ -343,9 +346,21 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
 
         {/* Footer */}
         <div className="px-6 py-3 bg-stone-50 border-t border-stone-200 flex items-center justify-between shrink-0">
-          <p className="text-[11px] text-stone-400">
-            支持随时追加拍摄实物高清细节图，照片保存在云端系统，手机与电脑实时同步。
-          </p>
+          <div className="flex items-center space-x-3">
+            {onDeleteMaterial && (
+              <button
+                type="button"
+                onClick={() => onDeleteMaterial(material)}
+                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-600 text-rose-600 hover:text-white border border-rose-200 hover:border-rose-600 text-xs font-semibold rounded-lg flex items-center space-x-1 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>删除该面料档案</span>
+              </button>
+            )}
+            <p className="text-[11px] text-stone-400 hidden sm:block">
+              支持随时追加拍摄实物高清细节图，照片保存在云端系统，手机与电脑实时同步。
+            </p>
+          </div>
           <button
             type="button"
             onClick={onClose}

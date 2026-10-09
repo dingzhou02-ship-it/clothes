@@ -10,6 +10,7 @@ import {
   Ruler,
   Wallet,
   ShoppingBag,
+  Trash2,
 } from 'lucide-react';
 import { Customer, CustomerLevel, Gender } from '../../types';
 import { formatMoney, formatDate, getCustomerLevelBadge } from '../../utils/formatters';
@@ -18,12 +19,14 @@ interface CustomersViewProps {
   customers: Customer[];
   onSelectCustomer: (customer: Customer) => void;
   onOpenCreateCustomer: () => void;
+  onDeleteCustomer?: (customer: Customer) => void;
 }
 
 export const CustomersView: React.FC<CustomersViewProps> = ({
   customers,
   onSelectCustomer,
   onOpenCreateCustomer,
+  onDeleteCustomer,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [levelFilter, setLevelFilter] = useState<'all' | CustomerLevel>('all');
@@ -191,16 +194,32 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                       </td>
 
                       <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={e => {
-                            e.stopPropagation();
-                            onSelectCustomer(c);
-                          }}
-                          className="px-2.5 py-1 text-xs text-stone-700 bg-stone-100 group-hover:bg-amber-100 group-hover:text-amber-900 rounded-lg font-medium transition-colors cursor-pointer inline-flex items-center space-x-1"
-                        >
-                          <span>档案详情</span>
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center justify-end space-x-1.5">
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              onSelectCustomer(c);
+                            }}
+                            className="px-2.5 py-1 text-xs text-stone-700 bg-stone-100 group-hover:bg-amber-100 group-hover:text-amber-900 rounded-lg font-medium transition-colors cursor-pointer inline-flex items-center space-x-1"
+                          >
+                            <span>档案详情</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                          {onDeleteCustomer && (
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                onDeleteCustomer(c);
+                              }}
+                              className="px-2 py-1 text-xs text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg font-medium transition-colors cursor-pointer inline-flex items-center space-x-1"
+                              title="删除该客户档案"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>删除</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

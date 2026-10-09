@@ -8,9 +8,13 @@ import {
   Calendar,
   FolderOpen,
   Filter,
+  Trash2,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { CustomerFile, Customer } from '../../types';
 import { formatDate } from '../../utils/formatters';
+import { storageService } from '../../services/storageService';
+import { ArchiveFileCardPreview } from '../common/ArchiveFileCardPreview';
 
 interface ArchivesViewProps {
   files: CustomerFile[];
@@ -18,6 +22,7 @@ interface ArchivesViewProps {
   onOpenUploadArchive: () => void;
   onOpenPdfPreview: (file: CustomerFile) => void;
   onSelectCustomer: (customer: Customer) => void;
+  onDeleteFile?: (file: CustomerFile) => void;
 }
 
 export const ArchivesView: React.FC<ArchivesViewProps> = ({
@@ -26,6 +31,7 @@ export const ArchivesView: React.FC<ArchivesViewProps> = ({
   onOpenUploadArchive,
   onOpenPdfPreview,
   onSelectCustomer,
+  onDeleteFile,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedYear, setSelectedYear] = useState<number | 'all'>('all');
@@ -48,6 +54,13 @@ export const ArchivesView: React.FC<ArchivesViewProps> = ({
     return matchSearch && matchYear && matchType;
   });
 
+  const formatArchiveSize = (bytes?: number) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
   return (
     <div className="space-y-5">
       {/* Top Header */}
@@ -62,7 +75,7 @@ export const ArchivesView: React.FC<ArchivesViewProps> = ({
               </span>
             </h2>
             <p className="text-xs text-stone-400 mt-0.5">
-              “扫描 → PDF → 上传 → 归档”，免 OCR 乱码，按客户与年份自动建树，方便随时调阅老纸质单据手记
+              上传的纸质档案照片与扫描件直接以清晰图片形式呈现，无需点进内层即可直接查阅手写单据与批注
             </p>
           </div>
 
@@ -71,7 +84,7 @@ export const ArchivesView: React.FC<ArchivesViewProps> = ({
             className="px-4 py-2.5 bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 shadow-sm transition-all cursor-pointer self-start sm:self-auto"
           >
             <Upload className="w-4 h-4 text-amber-400" />
-            <span>+ 录入老纸质订单扫描件</span>
+            <span>+ 上传纸质订单扫描件 / 照片</span>
           </button>
         </div>
 
@@ -130,75 +143,93 @@ export const ArchivesView: React.FC<ArchivesViewProps> = ({
         </div>
       </div>
 
-      {/* Files Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Files Grid - Direct Image Presentation */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {filteredFiles.map(file => {
           const cust = customers.find(c => c.id === file.customerId);
           return (
             <div
               key={file.id}
-              className="bg-white rounded-2xl border border-stone-200 p-5 hover:border-stone-400 transition-all shadow-xs flex flex-col justify-between space-y-4"
+              className="bg-white rounded-2xl border border-stone-200 p-4 sm:p-5 hover:border-stone-400 transition-all shadow-xs flex flex-col justify-between space-y-3.5"
             >
               <div className="space-y-3">
-                <div className="flex items-start space-x-3">
-                  <div className="p-2.5 bg-rose-50 text-rose-700 rounded-xl shrink-0">
-                    <FileText className="w-6 h-6" />
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center space-x-1.5">
-                      <span className="text-[10px] font-bold bg-stone-100 text-stone-800 px-2 py-0.5 rounded-md font-mono">
+                {/* Top Meta Header */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] font-bold bg-stone-900 text-amber-400 px-2 py-0.5 rounded-md font-mono">
                         {file.year}年度
                       </span>
-                      <span className="text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.2 rounded-md">
-                        {file.fileType === 'historical_order' ? '订单存根' : '手写量体'}
+                      <span className="text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-200 px-2 py-0.5 rounded-md">
+                        {file.fileType === 'historical_order'
+                          ? '历史订单存根'
+                          : file.fileType === 'historical_measurement'
+                          ? '手写量体单'
+                          : '手绘图纸/其他'}
                       </span>
+                      {cust && (
+                        <button
+                          type="button"
+                          onClick={() => onSelectCustomer(cust)}
+                          className="text-xs font-bold text-stone-800 bg-stone-100 hover:bg-amber-100 hover:text-amber-900 px-2.5 py-0.5 rounded-md transition-colors cursor-pointer"
+                        >
+                          客户：{cust.name} ({cust.phone})
+                        </button>
+                      )}
                     </div>
-                    <h3 className="text-xs font-bold text-stone-900 line-clamp-2">
+                    <h3 className="text-sm font-bold text-stone-900 break-all">
                       {file.fileName}
                     </h3>
                   </div>
                 </div>
 
-                {cust && (
-                  <div className="p-2.5 bg-stone-50 rounded-lg text-xs flex justify-between items-center">
-                    <span className="text-stone-500">所属客户：</span>
-                    <button
-                      onClick={() => onSelectCustomer(cust)}
-                      className="font-bold text-stone-800 hover:text-amber-800 hover:underline cursor-pointer"
-                    >
-                      {cust.name} ({cust.phone})
-                    </button>
-                  </div>
-                )}
+                {/* Direct Inline Image Presentation — No need to click inside to view */}
+                <ArchiveFileCardPreview
+                  file={file}
+                  onOpenFullPreview={onOpenPdfPreview}
+                  maxHeightClass="max-h-[520px]"
+                />
 
                 {file.remarks && (
-                  <p className="text-[11px] text-stone-600 bg-amber-50/30 p-2.5 rounded-lg border border-amber-100/60 leading-relaxed">
+                  <p className="text-xs text-stone-700 bg-amber-50/40 p-2.5 rounded-xl border border-amber-100 leading-relaxed">
                     <strong>老单手记：</strong> {file.remarks}
                   </p>
                 )}
               </div>
 
               <div className="pt-3 border-t border-stone-100 flex items-center justify-between text-xs">
-                <span className="text-[10px] text-stone-400">
-                  {formatDate(file.createdAt)} · {(file.fileSize / 1024 / 1024).toFixed(1)}MB
+                <span className="text-[11px] text-stone-400 font-mono">
+                  {formatDate(file.createdAt)} · {formatArchiveSize(file.fileSize)}
                 </span>
                 <div className="flex items-center space-x-2">
                   <button
+                    type="button"
+                    onClick={() => storageService.downloadFile(file.fileUrl, file.fileName, file.chunkCount)}
+                    className="px-2.5 py-1 text-xs bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-lg flex items-center space-x-1 cursor-pointer transition-colors"
+                    title="下载原文件"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>下载</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => onOpenPdfPreview(file)}
                     className="px-2.5 py-1 text-xs bg-stone-900 hover:bg-stone-800 text-white rounded-lg flex items-center space-x-1 cursor-pointer transition-colors shadow-xs"
                   >
                     <Eye className="w-3.5 h-3.5" />
-                    <span>查看原件</span>
+                    <span>全屏大图</span>
                   </button>
-                  <a
-                    href={file.fileUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="p-1 text-stone-500 hover:text-stone-900 rounded-md cursor-pointer"
-                    title="下载文件"
-                  >
-                    <Download className="w-4 h-4" />
-                  </a>
+                  {onDeleteFile && (
+                    <button
+                      type="button"
+                      onClick={() => onDeleteFile(file)}
+                      className="px-2 py-1 text-xs text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg flex items-center space-x-1 cursor-pointer transition-colors"
+                      title="删除该档案"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>删除</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

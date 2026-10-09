@@ -11,10 +11,12 @@ import {
   Tag,
   Eye,
   Image as ImageIcon,
+  Trash2,
 } from 'lucide-react';
 import { Material, InventoryTransaction } from '../../types';
 import { formatMoney, formatDateTime } from '../../utils/formatters';
 import { MaterialDetailModal } from '../modals/MaterialDetailModal';
+import { ResolvedImage } from '../common/ResolvedImage';
 
 interface MaterialsViewProps {
   materials: Material[];
@@ -22,6 +24,7 @@ interface MaterialsViewProps {
   onOpenCreateMaterial: () => void;
   onOpenInventoryModal: (material?: Material) => void;
   onUpdateMaterial: (materialId: string, updates: Partial<Material>) => Promise<void>;
+  onDeleteMaterial?: (material: Material) => void;
 }
 
 export const MaterialsView: React.FC<MaterialsViewProps> = ({
@@ -30,6 +33,7 @@ export const MaterialsView: React.FC<MaterialsViewProps> = ({
   onOpenCreateMaterial,
   onOpenInventoryModal,
   onUpdateMaterial,
+  onDeleteMaterial,
 }) => {
   const [activeTab, setActiveTab] = useState<'catalog' | 'transactions'>('catalog');
   const [searchTerm, setSearchTerm] = useState('');
@@ -152,7 +156,7 @@ export const MaterialsView: React.FC<MaterialsViewProps> = ({
                     title="点击查看高清实物大图与图集管理"
                   >
                     {m.imageUrls && m.imageUrls[0] ? (
-                      <img
+                      <ResolvedImage
                         src={m.imageUrls[0]}
                         alt={m.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
@@ -220,7 +224,7 @@ export const MaterialsView: React.FC<MaterialsViewProps> = ({
                     <span className="text-[10px] text-stone-400">安全线: {m.safetyStock}m · 售价: {formatMoney(m.salePrice)}/m</span>
                   </div>
 
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-1.5">
                     <button
                       onClick={() => setDetailMaterial(m)}
                       className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
@@ -234,6 +238,16 @@ export const MaterialsView: React.FC<MaterialsViewProps> = ({
                     >
                       增减库存
                     </button>
+                    {onDeleteMaterial && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteMaterial(m)}
+                        className="p-1.5 text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg transition-colors cursor-pointer"
+                        title="删除该面料档案"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -311,6 +325,14 @@ export const MaterialsView: React.FC<MaterialsViewProps> = ({
           setDetailMaterial(prev => (prev && prev.id === id ? { ...prev, ...updates } : prev));
         }}
         onOpenInventoryModal={onOpenInventoryModal}
+        onDeleteMaterial={
+          onDeleteMaterial
+            ? m => {
+                setDetailMaterial(null);
+                onDeleteMaterial(m);
+              }
+            : undefined
+        }
       />
     </div>
   );

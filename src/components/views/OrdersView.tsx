@@ -8,6 +8,7 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
+  Trash2,
 } from 'lucide-react';
 import { Order, OrderStatus } from '../../types';
 import {
@@ -21,6 +22,7 @@ interface OrdersViewProps {
   onSelectOrder: (order: Order) => void;
   onOpenCreateOrder: () => void;
   onOpenPrintOrder: (order: Order) => void;
+  onDeleteOrder?: (order: Order) => void;
 }
 
 export const OrdersView: React.FC<OrdersViewProps> = ({
@@ -28,6 +30,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   onSelectOrder,
   onOpenCreateOrder,
   onOpenPrintOrder,
+  onDeleteOrder,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | OrderStatus>('all');
@@ -204,6 +207,20 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                             <span>详情</span>
                             <ChevronRight className="w-3.5 h-3.5" />
                           </button>
+                          {onDeleteOrder && (
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                onDeleteOrder(o);
+                              }}
+                              className="px-2 py-1 text-xs text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg font-medium transition-colors cursor-pointer inline-flex items-center space-x-1"
+                              title="删除该定制订单"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>删除</span>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

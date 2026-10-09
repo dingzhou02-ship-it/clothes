@@ -35,7 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenUploadArchive,
   onToggleMobileSidebar,
 }) => {
-  const { currentUser, signOut } = useAuth();
+  const { currentUser, currentRole, hasPermission, signOut } = useAuth();
 
   const navTitles: Record<NavItemKey, { title: string; subtitle: string }> = {
     workbench: { title: '工坊工作台', subtitle: '经营关键指标、订单流转与今日待办' },
@@ -47,7 +47,7 @@ export const Header: React.FC<HeaderProps> = ({
     wallets: { title: '储值管理', subtitle: '双向会计记账流水、充值消费原子扣减与退款' },
     archives: { title: '历史档案', subtitle: '几千份纸质老订单原件免OCR高保真PDF扫描归档' },
     statistics: { title: '数据统计', subtitle: '客群分层画像、品类热度与销售回款进度' },
-    settings: { title: '系统设置', subtitle: '店铺信息、VIP折扣率策略与全量冷备份导出' },
+    settings: { title: '系统设置', subtitle: '操作者与角色权限、店铺信息、VIP折扣率与全量备份' },
   };
 
   const currentMeta = navTitles[currentNav] || navTitles.workbench;
@@ -103,64 +103,84 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* 5 Quick Action Shortcuts (Section 36) */}
         <div className="hidden xl:flex items-center space-x-1.5 bg-stone-50 p-1 rounded-xl border border-stone-200">
-          <button
-            onClick={onOpenCreateCustomer}
-            className="px-2.5 py-1 text-xs font-semibold text-stone-700 hover:text-stone-900 hover:bg-white rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
-          >
-            <UserPlus className="w-3.5 h-3.5 text-amber-600" />
-            <span>新建客户</span>
-          </button>
+          {hasPermission('customerCreate') && (
+            <button
+              onClick={onOpenCreateCustomer}
+              className="px-2.5 py-1 text-xs font-semibold text-stone-700 hover:text-stone-900 hover:bg-white rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-amber-600" />
+              <span>新建客户</span>
+            </button>
+          )}
 
-          <button
-            onClick={onOpenCreateOrder}
-            className="px-2.5 py-1 text-xs font-semibold text-stone-700 hover:text-stone-900 hover:bg-white rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
-          >
-            <ShoppingBag className="w-3.5 h-3.5 text-amber-600" />
-            <span>新建订单</span>
-          </button>
+          {hasPermission('orderCreate') && (
+            <button
+              onClick={onOpenCreateOrder}
+              className="px-2.5 py-1 text-xs font-semibold text-stone-700 hover:text-stone-900 hover:bg-white rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
+            >
+              <ShoppingBag className="w-3.5 h-3.5 text-amber-600" />
+              <span>新建订单</span>
+            </button>
+          )}
 
-          <button
-            onClick={onOpenRecharge}
-            className="px-2.5 py-1 text-xs font-semibold text-stone-700 hover:text-stone-900 hover:bg-white rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
-          >
-            <Wallet className="w-3.5 h-3.5 text-amber-600" />
-            <span>储值充值</span>
-          </button>
+          {hasPermission('walletRecharge') && (
+            <button
+              onClick={onOpenRecharge}
+              className="px-2.5 py-1 text-xs font-semibold text-stone-700 hover:text-stone-900 hover:bg-white rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
+            >
+              <Wallet className="w-3.5 h-3.5 text-amber-600" />
+              <span>储值充值</span>
+            </button>
+          )}
 
-          <button
-            onClick={onOpenAddMeasurement}
-            className="px-2.5 py-1 text-xs font-semibold text-stone-700 hover:text-stone-900 hover:bg-white rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
-          >
-            <Ruler className="w-3.5 h-3.5 text-amber-600" />
-            <span>录入量体</span>
-          </button>
+          {hasPermission('measurementCreate') && (
+            <button
+              onClick={onOpenAddMeasurement}
+              className="px-2.5 py-1 text-xs font-semibold text-stone-700 hover:text-stone-900 hover:bg-white rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
+            >
+              <Ruler className="w-3.5 h-3.5 text-amber-600" />
+              <span>录入量体</span>
+            </button>
+          )}
 
-          <button
-            onClick={onOpenUploadArchive}
-            className="px-2.5 py-1 text-xs font-semibold text-stone-700 hover:text-stone-900 hover:bg-white rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
-          >
-            <Upload className="w-3.5 h-3.5 text-amber-600" />
-            <span>上传档案</span>
-          </button>
+          {hasPermission('archiveUpload') && (
+            <button
+              onClick={onOpenUploadArchive}
+              className="px-2.5 py-1 text-xs font-semibold text-stone-700 hover:text-stone-900 hover:bg-white rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
+            >
+              <Upload className="w-3.5 h-3.5 text-amber-600" />
+              <span>上传档案</span>
+            </button>
+          )}
         </div>
 
         {/* Current User Profile & Logout */}
         <div className="flex items-center space-x-2 pl-2 border-l border-stone-200">
-          <div className="w-7 h-7 rounded-full bg-stone-900 text-amber-400 flex items-center justify-center font-bold text-xs shrink-0">
-            {currentUser?.displayName ? currentUser.displayName[0] : '店'}
-          </div>
+          {currentUser?.avatarUrl ? (
+            <img
+              src={currentUser.avatarUrl}
+              alt={currentUser.displayName}
+              className="w-7 h-7 rounded-full object-cover border border-amber-500/40 shrink-0"
+            />
+          ) : (
+            <div className="w-7 h-7 rounded-full bg-stone-900 text-amber-400 flex items-center justify-center font-bold text-xs shrink-0">
+              {currentUser?.displayName ? currentUser.displayName[0] : '店'}
+            </div>
+          )}
           <div className="hidden sm:block text-left">
             <p className="text-xs font-bold text-stone-900 leading-tight">
-              {currentUser?.displayName || '工坊主裁店员'}
+              {currentUser?.displayName || '工坊主裁'}
             </p>
             <p className="text-[10px] text-stone-400">
-              {currentUser?.role === 'admin' ? '系统管理员/主理人' : '店员'}
+              {currentRole?.name ||
+                currentUser?.roleName ||
+                (currentUser?.role === 'admin' ? '系统管理员/主理人' : '普通操作员')}
             </p>
           </div>
           <button
             onClick={signOut}
             className="p-1.5 text-stone-400 hover:text-rose-600 hover:bg-stone-100 rounded-lg transition-colors cursor-pointer"
-            title="退出登录"
+            title="退出登录并清理敏感缓存"
           >
             <LogOut className="w-4 h-4" />
           </button>
