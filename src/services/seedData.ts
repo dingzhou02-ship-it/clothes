@@ -1092,14 +1092,16 @@ export const SEED_ROLES: RoleDefinition[] = [
 export const SEED_OPERATORS: StaffUser[] = [
   {
     uid: 'staff-01',
-    email: 'dingzhou02@gmail.com',
+    email: '',
     displayName: '刘振海 (主理人/总裁缝师)',
-    phone: '138-0010-8888',
+    phone: '',
     position: '工坊主理人 / 首席主裁',
     role: 'admin',
     roleId: 'role-admin',
     roleName: '系统管理员 / 工坊主理人',
     status: 'active',
+    storeId: 'STORE_QICAI_DEFAULT',
+    accessScope: 'store',
     createdAt: '2024-01-01T08:00:00Z',
     lastLoginAt: '2026-10-08T10:00:00Z',
     updatedAt: '2026-10-08T10:00:00Z',

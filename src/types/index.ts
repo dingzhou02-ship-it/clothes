@@ -1,5 +1,8 @@
 export type CustomerLevel = 'normal' | 'vip' | 'svip';
 export type Gender = 'male' | 'female' | 'other';
+export type DataAccessScope = 'store' | 'personal';
+
+export const DEFAULT_STORE_ID = 'STORE_QICAI_DEFAULT';
 
 export interface Customer {
   id: string;
@@ -19,6 +22,8 @@ export interface Customer {
   lastMeasurementDate?: string;
   lastOrderDate?: string;
   isDeleted: boolean;
+  storeId?: string;
+  ownerUid?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -41,17 +46,19 @@ export interface Measurement {
   operatorName: string;
   height?: number; // cm
   weight?: number; // kg
-  shoulder?: number; // cm
-  chest?: number; // cm
-  waist?: number; // cm
-  hips?: number; // cm
-  sleeveLength?: number; // cm
+  shoulder?: number; // cm/尺
+  chest?: number; // cm/尺
+  waist?: number; // cm/尺
+  hips?: number; // cm/尺
+  sleeveLength?: number; // cm/尺
   clothLength?: number; // 尺
   upperArm?: number; // 尺
   wrist?: number; // 尺
   unit?: string; // 量体基准单位 (默认为 '尺')
   customItems: CustomMeasurementItem[];
   remarks?: string;
+  storeId?: string;
+  ownerUid?: string;
   createdAt: string;
 }
 
@@ -74,6 +81,8 @@ export interface Material {
   imageUrls: string[];
   remarks?: string;
   isDeleted: boolean;
+  storeId?: string;
+  ownerUid?: string;
   updatedAt: string;
 }
 
@@ -96,6 +105,8 @@ export interface InventoryTransaction {
   relatedOrderId?: string;
   operatorId: string;
   operatorName?: string;
+  storeId?: string;
+  ownerUid?: string;
   createdAt: string;
   remarks: string;
 }
@@ -107,8 +118,10 @@ export interface Style {
   category: string; // "西服" | "衬衫" | "大衣" | "中式服装" | "女装" | "裤装" | "其他"
   imageUrl?: string;
   description: string;
-  parameters: Record<string, string>; // e.g. { "版型": "修身", "驳头": "平驳头 8.5cm", "门襟": "单排两粒扣" }
+  parameters: Record<string, string>;
   status: 'active' | 'inactive';
+  storeId?: string;
+  ownerUid?: string;
   createdAt: string;
 }
 
@@ -135,7 +148,7 @@ export interface OrderItem {
   styleId?: string;
   styleNameSnapshot?: string;
   measurementIdSnapshot?: string;
-  measurementDataSnapshot?: Partial<Measurement>; // 当时量体瞬时数据快照 (历史不可变)
+  measurementDataSnapshot?: Partial<Measurement>;
   unitPrice: number; // 分
   discountRate: number; // e.g. 0.95
   subtotal: number; // 分
@@ -181,6 +194,8 @@ export interface Order {
   payments: OrderPayment[];
   remarks?: string;
   operatorId: string;
+  storeId?: string;
+  ownerUid?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -192,6 +207,8 @@ export interface Wallet {
   totalRecharged: number; // 分
   totalConsumed: number; // 分
   version: number;
+  storeId?: string;
+  ownerUid?: string;
   updatedAt: string;
 }
 
@@ -215,6 +232,8 @@ export interface WalletTransaction {
   paymentOrderId?: string;
   operatorId: string;
   operatorName?: string;
+  storeId?: string;
+  ownerUid?: string;
   createdAt: string;
   remarks: string;
 }
@@ -227,6 +246,8 @@ export interface PaymentOrder {
   provider: 'mock' | 'wechat' | 'alipay';
   status: 'pending' | 'paid' | 'failed' | 'cancelled' | 'refunded';
   providerTransactionId?: string;
+  storeId?: string;
+  ownerUid?: string;
   createdAt: string;
   paidAt?: string;
   relatedWalletTransactionId?: string;
@@ -250,6 +271,8 @@ export interface CustomerFile {
   operatorId: string;
   operatorName?: string;
   remarks?: string;
+  storeId?: string;
+  ownerUid?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -261,6 +284,8 @@ export interface FileChunk {
   totalChunks: number;
   data: string;
   mimeType: string;
+  storeId?: string;
+  ownerUid?: string;
   createdAt: string;
 }
 
@@ -276,6 +301,8 @@ export interface CustomerImage {
   title: string;
   remarks?: string;
   operatorId: string;
+  storeId?: string;
+  ownerUid?: string;
   createdAt: string;
 }
 
@@ -290,6 +317,8 @@ export interface StoreSetting {
   defaultSafetyStock: number; // e.g. 10 (m)
   printHeader: string;
   printFooter: string;
+  storeId?: string;
+  ownerUid?: string;
   updatedAt?: string;
   version?: number;
 }
@@ -305,6 +334,8 @@ export interface AuditLog {
   timestamp: string;
   details: string;
   result?: 'success' | 'failure';
+  storeId?: string;
+  ownerUid?: string;
 }
 
 export interface RolePermissions {
@@ -358,14 +389,52 @@ export interface StaffUser {
   uid: string;
   email: string;
   displayName: string;
-  phone?: string;
+  phone?: string; // E.164 format or display phone
+  e164Phone?: string;
   avatarUrl?: string;
   position?: string;
   role: 'admin' | 'staff';
   roleId?: string;
   roleName?: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'revoked';
+  storeId: string;
+  accessScope: DataAccessScope;
+  boundUid?: string;
+  authProvider?: 'phone' | 'google' | 'password';
   createdAt?: string;
   lastLoginAt?: string;
   updatedAt?: string;
+}
+
+export interface AuthorizedPhone {
+  phone: string; // E.164 format e.g. +8613800108888 (Document ID in /authorizedPhones/{phone})
+  displayName: string;
+  position?: string;
+  email?: string;
+  role: 'admin' | 'staff';
+  roleId: string;
+  roleName: string;
+  status: 'active' | 'inactive' | 'revoked';
+  storeId: string;
+  accessScope: DataAccessScope;
+  boundUid?: string | null;
+  operatorId?: string;
+  authorizedByUid: string;
+  authorizedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LegacyDataInspectionSummary {
+  totalRecords: number;
+  unmigratedCount: number;
+  migratedCount: number;
+  collections: {
+    collectionName: string;
+    label: string;
+    total: number;
+    unmigrated: number;
+    migrated: number;
+  }[];
+  lastCheckedAt: string;
 }

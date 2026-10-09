@@ -358,6 +358,27 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["email", "role", "status"]
+    },
+    "authorizedPhone": {
+      "title": "AuthorizedPhone",
+      "description": "Whitelisted E.164 phone number authorized for SMS verification login and UID binding",
+      "type": "object",
+      "properties": {
+        "phone": { "type": "string" },
+        "displayName": { "type": "string" },
+        "position": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "staff"] },
+        "roleId": { "type": "string" },
+        "roleName": { "type": "string" },
+        "storeId": { "type": "string" },
+        "accessScope": { "type": "string", "enum": ["store", "personal"] },
+        "status": { "type": "string", "enum": ["active", "inactive", "revoked"] },
+        "boundUid": { "type": "string" },
+        "operatorId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["phone", "role", "storeId", "accessScope", "status"]
     }
   },
   "firestore": {
@@ -368,6 +389,10 @@
     "/admins/{userId}": {
       "schema": { "$ref": "user" },
       "description": "Administrator validation collection"
+    },
+    "/authorizedPhones/{phoneId}": {
+      "schema": { "$ref": "authorizedPhone" },
+      "description": "Whitelisted E.164 phone numbers allowed to sign in via SMS verification"
     },
     "/allowedEmails/{email}": {
       "schema": { "$ref": "allowedEmail" },

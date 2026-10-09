@@ -1,0 +1,59 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasActiveUserDoc() {
+      return isSignedIn() &&
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.status == 'active';
+    }
+
+    function getUserDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return (isSignedIn() &&
+        request.auth.token.email == "dingzhou02@gmail.com" &&
+        request.auth.token.email_verified == true) ||
+        (hasActiveUserDoc() && getUserDoc().role == 'admin');
+    }
+
+    function userStoreId() {
+      return hasActiveUserDoc() && 'storeId' in getUserDoc()
+        ? getUserDoc().storeId
+        : 'STORE_QICAI_DEFAULT';
+    }
+
+    function userAccessScope() {
+      return isAdmin()
+        ? 'store'
+        : (hasActiveUserDoc() && 'accessScope' in getUserDoc()
+            ? getUserDoc().accessScope
+            : 'store');
+    }
+
+    // 店铺与账号级隔离存储路径：/stores/{storeId}/{folder}/{ownerUid}/{fileName}
+    // 禁止通过修改文件路径跨店铺或跨个人隔离账号读取、覆盖或删除历史档案与照片
+    match /stores/{storeId}/{folder}/{ownerUid}/{fileName} {
+      allow read: if hasActiveUserDoc() &&
+        storeId == userStoreId() &&
+        (isAdmin() || userAccessScope() == 'store' || ownerUid == request.auth.uid);
+
+      allow write: if hasActiveUserDoc() &&
+        storeId == userStoreId() &&
+        (isAdmin() || ownerUid == request.auth.uid) &&
+        request.resource.size < 20 * 1024 * 1024;
+    }
+
+    // 默认拦截一切未匹配路径的读写
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

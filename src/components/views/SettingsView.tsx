@@ -31,11 +31,20 @@ import {
   RolePermissions,
   AuditLog,
   Customer,
+  AuthorizedPhone,
+  DataAccessScope,
+  DEFAULT_STORE_ID,
 } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { storeService } from '../../services/storeService';
+import { storeService, LegacyDataInspectionSummary } from '../../services/storeService';
 import { storageService } from '../../services/storageService';
 import { formatDateTime } from '../../utils/formatters';
+import {
+  COUNTRY_CODES,
+  validatePhoneNumber,
+  formatPhoneDisplay,
+  maskPhone,
+} from '../../utils/phoneUtils';
 
 interface SettingsViewProps {
   settings: StoreSetting;
@@ -147,21 +156,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
-  // Operators & Roles state
+  // Operators, AuthorizedPhones & Roles state
   const [operators, setOperators] = useState<StaffUser[]>([]);
+  const [authorizedPhones, setAuthorizedPhones] = useState<AuthorizedPhone[]>([]);
   const [roles, setRoles] = useState<RoleDefinition[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [selectedRoleEdit, setSelectedRoleEdit] = useState<RoleDefinition | null>(null);
+
+  // Legacy Data Scope Inspection & Migration state
+  const [inspectionSummary, setInspectionSummary] = useState<LegacyDataInspectionSummary | null>(null);
+  const [inspectingData, setInspectingData] = useState(false);
+  const [migrationScopeMode, setMigrationScopeMode] = useState<DataAccessScope>('store');
+  const [migratingScope, setMigratingScope] = useState(false);
 
   // Operator Modal / Form state
   const [editingOperator, setEditingOperator] = useState<StaffUser | null>(null);
   const [isAddingOperator, setIsAddingOperator] = useState(false);
   const [opFormName, setOpFormName] = useState('');
-  const [opFormEmail, setOpFormEmail] = useState('');
+  const [opFormCountryCode, setOpFormCountryCode] = useState('+86');
   const [opFormPhone, setOpFormPhone] = useState('');
+  const [opFormEmail, setOpFormEmail] = useState('');
   const [opFormPosition, setOpFormPosition] = useState('');
   const [opFormRoleId, setOpFormRoleId] = useState('role-staff');
-  const [opFormStatus, setOpFormStatus] = useState<'active' | 'inactive'>('active');
+  const [opFormAccessScope, setOpFormAccessScope] = useState<DataAccessScope>('store');
+  const [opFormStatus, setOpFormStatus] = useState<'active' | 'inactive' | 'revoked'>('active');
 
   // Status & Verification state
   const [loading, setLoading] = useState(false);
@@ -192,12 +210,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   }, [currentUser]);
 
   const loadOperatorsAndRoles = async () => {
-    const [opList, roleList, logList] = await Promise.all([
+    const [opList, phoneList, roleList, logList] = await Promise.all([
       storeService.getOperators(),
+      storeService.getAuthorizedPhones(),
       storeService.getRoles(),
       storeService.getAuditLogs(),
     ]);
     setOperators(opList);
+    setAuthorizedPhones(phoneList);
     setRoles(roleList);
     setAuditLogs(logList);
     if (!selectedRoleEdit && roleList.length > 0) {
@@ -205,8 +225,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
+  const handleInspectLegacyData = async () => {
+    setInspectingData(true);
+    try {
+      const summary = await storeService.inspectLegacyDataScope();
+      setInspectionSummary(summary);
+    } catch {
+      // ignore
+    } finally {
+      setInspectingData(false);
+    }
+  };
+
   useEffect(() => {
     loadOperatorsAndRoles();
+    handleInspectLegacyData();
   }, []);
 
   const showToast = (msg: string, isError = false) => {
@@ -287,10 +320,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleOpenAddOperator = () => {
     setEditingOperator(null);
     setOpFormName('');
-    setOpFormEmail('');
+    setOpFormCountryCode('+86');
     setOpFormPhone('');
+    setOpFormEmail('');
     setOpFormPosition('高级量体师 / 定制顾问');
     setOpFormRoleId('role-staff');
+    setOpFormAccessScope('store');
     setOpFormStatus('active');
     setIsAddingOperator(true);
   };
@@ -298,10 +333,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleOpenEditOperator = (op: StaffUser) => {
     setEditingOperator(op);
     setOpFormName(op.displayName);
-    setOpFormEmail(op.email);
-    setOpFormPhone(op.phone || '');
+    setOpFormEmail(op.email || '');
+    const rawP = op.phone || '';
+    if (rawP.startsWith('+86')) {
+      setOpFormCountryCode('+86');
+      setOpFormPhone(rawP.slice(3));
+    } else {
+      setOpFormCountryCode('+86');
+      setOpFormPhone(rawP);
+    }
     setOpFormPosition(op.position || '');
     setOpFormRoleId(op.roleId || (op.role === 'admin' ? 'role-admin' : 'role-staff'));
+    setOpFormAccessScope(op.accessScope || 'store');
     setOpFormStatus(op.status);
     setIsAddingOperator(true);
   };
@@ -309,23 +352,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleSaveOperator = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasPermission('operatorManage')) {
-      showToast('权限不足：仅管理员可管理操作者账号', true);
+      showToast('权限不足：仅管理员可管理授权手机号与操作者账号', true);
       return;
     }
+
+    let normalizedPhone = '';
+    if (opFormPhone.trim()) {
+      const check = validatePhoneNumber(opFormPhone.trim(), opFormCountryCode);
+      if (!check.valid) {
+        showToast(check.error || '请输入格式正确的授权手机号', true);
+        return;
+      }
+      normalizedPhone = check.e164Phone;
+    } else if (!opFormEmail.trim()) {
+      showToast('请至少填写授权手机号（推荐用于短信验证码登录）或登录邮箱', true);
+      return;
+    }
+
     try {
       setLoading(true);
       const targetRole = roles.find(r => r.id === opFormRoleId) || roles[1] || roles[0];
       const roleKey: 'admin' | 'staff' = targetRole?.roleKey === 'admin' ? 'admin' : 'staff';
       const payload: StaffUser = {
         uid: editingOperator ? editingOperator.uid : `staff-${Date.now().toString().slice(-6)}`,
+        boundUid: editingOperator?.boundUid,
         email: opFormEmail.trim().toLowerCase(),
         displayName: opFormName.trim(),
-        phone: opFormPhone.trim(),
+        phone: normalizedPhone,
         position: opFormPosition.trim(),
         avatarUrl: editingOperator?.avatarUrl || '',
         role: roleKey,
         roleId: targetRole?.id || opFormRoleId,
         roleName: targetRole?.name || (roleKey === 'admin' ? '系统管理员' : '普通操作员'),
+        storeId: editingOperator?.storeId || currentUser?.storeId || DEFAULT_STORE_ID,
+        accessScope: opFormAccessScope,
         status: opFormStatus,
         createdAt: editingOperator?.createdAt || new Date().toISOString(),
         lastLoginAt: editingOperator?.lastLoginAt,
@@ -336,11 +396,70 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setEditingOperator(null);
       await loadOperatorsAndRoles();
       await refreshOperatorProfile();
-      showToast(editingOperator ? '操作者信息与权限已更新！' : '已成功新增授权操作者账号并加入安全白名单！');
+      showToast(
+        editingOperator
+          ? '账号授权信息、手机号白名单与数据访问范围已同步更新！'
+          : '已成功新增授权手机号与操作者账号，该手机号现在可通过短信验证码登录系统！'
+      );
     } catch (err: any) {
       showToast(err?.message || '保存操作者失败', true);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleTogglePhoneAuthStatus = async (
+    phoneRecord: AuthorizedPhone,
+    nextStatus: 'active' | 'inactive' | 'revoked'
+  ) => {
+    if (!hasPermission('operatorManage')) {
+      showToast('权限不足：仅管理员可变更手机号授权状态', true);
+      return;
+    }
+    const actionLabel =
+      nextStatus === 'active' ? '重新启用' : nextStatus === 'revoked' ? '撤销授权' : '停用冻结';
+    if (
+      !window.confirm(
+        `确定要将手机号 ${formatPhoneDisplay(phoneRecord.phone)} (${phoneRecord.displayName}) 设为「${actionLabel}」吗？`
+      )
+    ) {
+      return;
+    }
+    try {
+      setLoading(true);
+      await storeService.setAuthorizedPhoneStatus(phoneRecord.phone, nextStatus);
+      await loadOperatorsAndRoles();
+      showToast(`已将手机号 ${formatPhoneDisplay(phoneRecord.phone)} 状态更新为：${actionLabel}`);
+    } catch (err: any) {
+      showToast(err?.message || '更新手机号授权状态失败', true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExecuteScopeMigration = async () => {
+    if (!hasPermission('operatorManage') && currentUser?.role !== 'admin') {
+      showToast('权限不足：仅系统管理员可执行历史数据归属迁移', true);
+      return;
+    }
+    try {
+      setMigratingScope(true);
+      const res = await storeService.executeDataScopeMigration({
+        mode: migrationScopeMode,
+        targetStoreId: currentUser?.storeId || DEFAULT_STORE_ID,
+      });
+      await handleInspectLegacyData();
+      showToast(
+        `现有数据安全归属迁移完成！已提前创建本地快照备份=${
+          res.backedUp ? '成功' : '已就绪'
+        }，共为 ${res.migratedTotal} 条历史记录安全补齐所属店铺 (${
+          currentUser?.storeId || DEFAULT_STORE_ID
+        }) 与所有者 UID 标签。`
+      );
+    } catch (err: any) {
+      showToast(err?.message || '执行数据归属迁移失败', true);
+    } finally {
+      setMigratingScope(false);
     }
   };
 
@@ -663,14 +782,17 @@ startxref
                   />
                 </div>
                 <div className="space-y-1">
-                  <div className="flex items-center space-x-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-bold text-stone-900">{currentUser?.displayName}</span>
                     <span className="text-[11px] px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-md font-semibold">
                       {currentRole?.name || (currentUser?.role === 'admin' ? '系统管理员' : '普通操作员')}
                     </span>
+                    <span className="text-[11px] px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-md font-semibold">
+                      数据范围：{currentUser?.accessScope === 'personal' ? '个人数据隔离 (ownerUid)' : `店铺共享 (${currentUser?.storeId || DEFAULT_STORE_ID})`}
+                    </span>
                   </div>
                   <p className="text-xs text-stone-500 font-mono">
-                    登录账号：{currentUser?.email}（受唯一性与安全认证保护）
+                    绑定认证 UID：{currentUser?.boundUid || currentUser?.uid} · 授权手机：{currentUser?.phone ? formatPhoneDisplay(currentUser.phone) : '未绑定'} {currentUser?.email ? `· 邮箱：${currentUser.email}` : ''}
                   </p>
                   <p className="text-[11px] text-stone-400">
                     创建时间：{formatDateTime(currentUser?.createdAt || '2024-01-01T08:00:00Z')} · 最后登录：{formatDateTime(currentUser?.lastLoginAt || new Date().toISOString())}
@@ -782,38 +904,158 @@ startxref
             </form>
           </div>
 
-          {/* 2. 操作者账号列表与白名单管理 (Admin Only) */}
-          <div className="bg-white rounded-2xl border border-stone-200 p-5 shadow-xs space-y-4">
-            <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+          {/* 2. 手机号短信验证码白名单与操作者账号隔离管理 (Admin Only) */}
+          <div className="bg-white rounded-2xl border border-stone-200 p-5 shadow-xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
               <div>
                 <h3 className="text-sm font-bold text-stone-900 flex items-center space-x-2">
                   <Users className="w-4 h-4 text-amber-600" />
-                  <span>工坊授权操作者账号目录（白名单访问控制）</span>
+                  <span>授权手机号白名单与账号数据隔离管理（短信验证码登录准入控制）</span>
                 </h3>
                 <p className="text-[11px] text-stone-400 mt-0.5">
-                  仅在此名单中且状态为“正常启用”的账号可登录并读写云端数据；支持后续随时新增店员或量体师账号
+                  仅在此授权名单中且状态为“正常启用”的手机号可通过短信验证码进入系统；首次登录自动强绑定唯一 Firebase UID，严防未授权号码访问
                 </p>
               </div>
               {hasPermission('operatorManage') && (
                 <button
                   type="button"
                   onClick={handleOpenAddOperator}
-                  className="px-3.5 py-2 bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 cursor-pointer"
+                  className="px-3.5 py-2 bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 cursor-pointer shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5 text-amber-400" />
-                  <span>新增授权操作者</span>
+                  <span>新增授权手机号 / 操作员</span>
                 </button>
               )}
             </div>
+
+            {/* 已授权手机号快速管控表 */}
+            {authorizedPhones.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-bold text-stone-800 flex items-center justify-between">
+                  <span>已授权短信登录手机号白名单 (/authorizedPhones)</span>
+                  <span className="text-[11px] font-normal text-stone-400">
+                    共 {authorizedPhones.length} 个登记号码
+                  </span>
+                </div>
+                <div className="overflow-x-auto border border-stone-200 rounded-xl">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-stone-200 text-stone-500 bg-stone-50">
+                        <th className="py-2.5 px-3">授权手机号 (E.164)</th>
+                        <th className="py-2.5 px-3">持有人 / 岗位</th>
+                        <th className="py-2.5 px-3">角色与数据访问范围</th>
+                        <th className="py-2.5 px-3">唯一认证 UID 绑定状态</th>
+                        <th className="py-2.5 px-3">授权状态</th>
+                        <th className="py-2.5 px-3 text-right">快捷权限管控</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {authorizedPhones.map(ap => (
+                        <tr key={ap.phone} className="hover:bg-stone-50/80">
+                          <td className="py-2.5 px-3 font-mono font-bold text-stone-900">
+                            {formatPhoneDisplay(ap.phone)}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-semibold text-stone-900">{ap.displayName}</div>
+                            <div className="text-[11px] text-stone-400">{ap.position || '工坊成员'}</div>
+                          </td>
+                          <td className="py-2.5 px-3 space-y-1">
+                            <div>
+                              <span
+                                className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                                  ap.role === 'admin'
+                                    ? 'bg-amber-100 text-amber-900'
+                                    : 'bg-stone-100 text-stone-700'
+                                }`}
+                              >
+                                {ap.roleName || (ap.role === 'admin' ? '系统管理员' : '普通操作员')}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-stone-500">
+                              {ap.accessScope === 'personal'
+                                ? '🔒 个人数据隔离 (仅本人 ownerUid)'
+                                : `🏪 店铺共享 (${ap.storeId || DEFAULT_STORE_ID})`}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-[11px]">
+                            {ap.boundUid ? (
+                              <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                                已绑定 UID: {ap.boundUid.slice(0, 10)}...
+                              </span>
+                            ) : (
+                              <span className="text-stone-400 bg-stone-100 px-2 py-0.5 rounded">
+                                待首次短信登录自动绑定
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                                ap.status === 'active'
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : ap.status === 'revoked'
+                                  ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                                  : 'bg-amber-50 text-amber-700 border border-amber-200'
+                              }`}
+                            >
+                              {ap.status === 'active'
+                                ? '正常启用'
+                                : ap.status === 'revoked'
+                                ? '已撤销授权'
+                                : '已停用'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right space-x-1.5">
+                            {hasPermission('operatorManage') ? (
+                              <>
+                                {ap.status !== 'active' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTogglePhoneAuthStatus(ap, 'active')}
+                                    className="px-2 py-1 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium cursor-pointer"
+                                  >
+                                    启用
+                                  </button>
+                                )}
+                                {ap.status === 'active' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTogglePhoneAuthStatus(ap, 'inactive')}
+                                    className="px-2 py-1 text-[11px] bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg font-medium cursor-pointer"
+                                  >
+                                    停用
+                                  </button>
+                                )}
+                                {ap.status !== 'revoked' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTogglePhoneAuthStatus(ap, 'revoked')}
+                                    className="px-2 py-1 text-[11px] bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg font-medium cursor-pointer"
+                                  >
+                                    撤销
+                                  </button>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-[11px] text-stone-400">仅管理员</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-stone-200 text-stone-400 bg-stone-50">
                     <th className="py-2.5 px-3">操作者姓名 / 岗位</th>
-                    <th className="py-2.5 px-3">登录账号 (唯一校验)</th>
-                    <th className="py-2.5 px-3">联系电话</th>
-                    <th className="py-2.5 px-3">所属角色</th>
+                    <th className="py-2.5 px-3">授权手机号 / 邮箱</th>
+                    <th className="py-2.5 px-3">绑定 UID</th>
+                    <th className="py-2.5 px-3">角色与数据隔离范围</th>
                     <th className="py-2.5 px-3">状态</th>
                     <th className="py-2.5 px-3">最后登录时间</th>
                     <th className="py-2.5 px-3 text-right">管理操作</th>
@@ -826,18 +1068,32 @@ startxref
                         <div className="font-bold text-stone-900">{op.displayName}</div>
                         <div className="text-[11px] text-stone-400">{op.position || '工坊成员'}</div>
                       </td>
-                      <td className="py-3 px-3 font-mono text-stone-700">{op.email}</td>
-                      <td className="py-3 px-3 text-stone-600">{op.phone || '-'}</td>
-                      <td className="py-3 px-3">
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
-                            op.role === 'admin'
-                              ? 'bg-amber-100 text-amber-900'
-                              : 'bg-stone-100 text-stone-700'
-                          }`}
-                        >
-                          {op.roleName || (op.role === 'admin' ? '系统管理员' : '普通操作员')}
-                        </span>
+                      <td className="py-3 px-3 font-mono text-stone-700">
+                        <div className="font-bold text-stone-900">
+                          {op.phone ? formatPhoneDisplay(op.phone) : '未绑定手机号'}
+                        </div>
+                        {op.email && <div className="text-[11px] text-stone-400">{op.email}</div>}
+                      </td>
+                      <td className="py-3 px-3 font-mono text-[11px] text-stone-500">
+                        {op.boundUid ? `${op.boundUid.slice(0, 10)}...` : op.uid}
+                      </td>
+                      <td className="py-3 px-3 space-y-1">
+                        <div>
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                              op.role === 'admin'
+                                ? 'bg-amber-100 text-amber-900'
+                                : 'bg-stone-100 text-stone-700'
+                            }`}
+                          >
+                            {op.roleName || (op.role === 'admin' ? '系统管理员' : '普通操作员')}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-stone-500">
+                          {op.accessScope === 'personal'
+                            ? '🔒 个人数据隔离模式'
+                            : `🏪 店铺共享 (${op.storeId || DEFAULT_STORE_ID})`}
+                        </div>
                       </td>
                       <td className="py-3 px-3">
                         <span
@@ -847,7 +1103,11 @@ startxref
                               : 'bg-rose-50 text-rose-700 border border-rose-200'
                           }`}
                         >
-                          {op.status === 'active' ? '正常启用' : '已停用'}
+                          {op.status === 'active'
+                            ? '正常启用'
+                            : op.status === 'revoked'
+                            ? '已撤销'
+                            : '已停用'}
                         </span>
                       </td>
                       <td className="py-3 px-3 text-[11px] text-stone-400">
@@ -860,16 +1120,16 @@ startxref
                               type="button"
                               onClick={() => handleOpenEditOperator(op)}
                               className="p-1.5 text-stone-600 hover:text-stone-900 bg-stone-100 rounded-lg cursor-pointer"
-                              title="编辑操作者"
+                              title="编辑操作者与手机号授权"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
-                            {op.email !== 'dingzhou02@gmail.com' && (
+                            {op.uid !== currentUser?.uid && (
                               <button
                                 type="button"
                                 onClick={() => handleDeleteOperator(op)}
                                 className="p-1.5 text-stone-400 hover:text-rose-600 bg-stone-100 rounded-lg cursor-pointer"
-                                title="移除操作者"
+                                title="撤销并移除操作者"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -892,7 +1152,9 @@ startxref
               >
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold text-stone-900">
-                    {editingOperator ? `编辑操作者：${editingOperator.displayName}` : '新增授权操作者账号'}
+                    {editingOperator
+                      ? `编辑账号与手机号授权：${editingOperator.displayName}`
+                      : '新增授权手机号与操作者账号'}
                   </h4>
                   <button
                     type="button"
@@ -914,28 +1176,41 @@ startxref
                       className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg"
                     />
                   </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-stone-700 font-medium mb-1">
+                      授权登录手机号 (用于短信验证码登录，自动转为 E.164 标准格式) *
+                    </label>
+                    <div className="flex gap-2">
+                      <select
+                        value={opFormCountryCode}
+                        onChange={e => setOpFormCountryCode(e.target.value)}
+                        className="w-32 px-2 py-2 bg-white border border-stone-300 rounded-lg"
+                      >
+                        {COUNTRY_CODES.map(c => (
+                          <option key={c.code} value={c.code}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="tel"
+                        value={opFormPhone}
+                        onChange={e => setOpFormPhone(e.target.value)}
+                        placeholder="请输入11位手机号，如 13800138000"
+                        className="flex-1 px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono"
+                      />
+                    </div>
+                  </div>
                   <div>
                     <label className="block text-stone-700 font-medium mb-1">
-                      登录邮箱账号 (唯一校验) *
+                      备用登录邮箱 (选填)
                     </label>
                     <input
                       type="email"
-                      required
-                      disabled={editingOperator?.email === 'dingzhou02@gmail.com'}
                       value={opFormEmail}
                       onChange={e => setOpFormEmail(e.target.value)}
-                      placeholder="operator@example.com"
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono disabled:bg-stone-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-stone-700 font-medium mb-1">联系电话</label>
-                    <input
-                      type="text"
-                      value={opFormPhone}
-                      onChange={e => setOpFormPhone(e.target.value)}
-                      placeholder="138-xxxx-xxxx"
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg"
+                      placeholder="选填，如 operator@example.com"
+                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono"
                     />
                   </div>
                   <div>
@@ -953,7 +1228,6 @@ startxref
                     <select
                       value={opFormRoleId}
                       onChange={e => setOpFormRoleId(e.target.value)}
-                      disabled={editingOperator?.email === 'dingzhou02@gmail.com'}
                       className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg"
                     >
                       {roles.map(r => (
@@ -963,16 +1237,35 @@ startxref
                       ))}
                     </select>
                   </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-stone-700 font-medium mb-1">
+                      账号级数据访问隔离范围 (Data Access Scope)
+                    </label>
+                    <select
+                      value={opFormAccessScope}
+                      onChange={e => setOpFormAccessScope(e.target.value as DataAccessScope)}
+                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg font-semibold"
+                    >
+                      <option value="store">
+                        🏪 店铺共享模式 (storeId={DEFAULT_STORE_ID}：可协同访问本店铺全部客户、订单与量体)
+                      </option>
+                      <option value="personal">
+                        🔒 个人数据隔离模式 (ownerUid：严格隔离，仅能读写该账号本人创建/归属的客户与订单)
+                      </option>
+                    </select>
+                  </div>
                   <div>
-                    <label className="block text-stone-700 font-medium mb-1">账号状态</label>
+                    <label className="block text-stone-700 font-medium mb-1">账号授权状态</label>
                     <select
                       value={opFormStatus}
-                      onChange={e => setOpFormStatus(e.target.value as 'active' | 'inactive')}
-                      disabled={editingOperator?.email === 'dingzhou02@gmail.com'}
+                      onChange={e =>
+                        setOpFormStatus(e.target.value as 'active' | 'inactive' | 'revoked')
+                      }
                       className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg"
                     >
-                      <option value="active">正常启用 (允许登录与访问)</option>
-                      <option value="inactive">停用冻结 (立即拦截数据库访问)</option>
+                      <option value="active">正常启用 (允许短信登录与数据读写)</option>
+                      <option value="inactive">停用冻结 (立即阻断登录与数据库访问)</option>
+                      <option value="revoked">撤销授权 (永久收回访问权限)</option>
                     </select>
                   </div>
                 </div>
@@ -982,7 +1275,7 @@ startxref
                     disabled={loading}
                     className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold rounded-xl cursor-pointer"
                   >
-                    确认保存操作者配置
+                    确认保存手机号白名单与权限配置
                   </button>
                 </div>
               </form>
@@ -1404,6 +1697,119 @@ startxref
       {/* TAB 3: 多端同步迁移 · 备份与上传实测验证 */}
       {activeTab === 'sync' && (
         <div className="space-y-6">
+          {/* 0. 现有业务数据检查与安全归属迁移 (Legacy Data Scope Inspection & Migration) */}
+          <div className="bg-white rounded-2xl border border-stone-200 p-5 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-stone-900 flex items-center space-x-2">
+                  <Lock className="w-4 h-4 text-amber-600" />
+                  <span>现有数据检查与账号/店铺级安全归属迁移（不删改、不覆盖已有业务记录）</span>
+                </h3>
+                <p className="text-[11px] text-stone-400 mt-0.5">
+                  在向新店员账号开放权限前，先检查数据库中现有客户、订单、量体、储值和档案记录，并安全绑定 storeId 与初始管理员 ownerUid
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={inspectingData}
+                onClick={handleInspectLegacyData}
+                className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-semibold rounded-xl flex items-center space-x-1.5 cursor-pointer shrink-0"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${inspectingData ? 'animate-spin' : ''}`} />
+                <span>重新扫描数据库存量</span>
+              </button>
+            </div>
+
+            {inspectionSummary && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl">
+                    <div className="text-stone-500">云端有效业务记录总数</div>
+                    <div className="text-lg font-bold text-stone-900 font-mono mt-0.5">
+                      {inspectionSummary.totalRecords} 条
+                    </div>
+                  </div>
+                  <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl">
+                    <div className="text-emerald-700">已完成安全范围绑定 (storeId + ownerUid)</div>
+                    <div className="text-lg font-bold text-emerald-900 font-mono mt-0.5">
+                      {inspectionSummary.migratedCount} 条
+                    </div>
+                  </div>
+                  <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl">
+                    <div className="text-amber-800">待补齐归属标记的历史记录</div>
+                    <div className="text-lg font-bold text-amber-900 font-mono mt-0.5">
+                      {inspectionSummary.unmigratedCount} 条
+                    </div>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto border border-stone-200 rounded-xl">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-stone-50 border-b border-stone-200 text-stone-500">
+                        <th className="py-2 px-3">业务集合名称</th>
+                        <th className="py-2 px-3">现有总记录数</th>
+                        <th className="py-2 px-3">已绑定范围记录</th>
+                        <th className="py-2 px-3">待归属迁移记录</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {inspectionSummary.collections.map(col => (
+                        <tr key={col.collectionName}>
+                          <td className="py-2 px-3 font-medium text-stone-800">{col.label}</td>
+                          <td className="py-2 px-3 font-mono">{col.total}</td>
+                          <td className="py-2 px-3 font-mono text-emerald-700">{col.migrated}</td>
+                          <td className="py-2 px-3 font-mono text-amber-700 font-bold">
+                            {col.unmigrated}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="p-3.5 bg-stone-50 border border-stone-200 rounded-xl space-y-3 text-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <label className="block font-bold text-stone-900 mb-1">
+                        选择现有历史数据的安全归属模式：
+                      </label>
+                      <select
+                        value={migrationScopeMode}
+                        onChange={e => setMigrationScopeMode(e.target.value as DataAccessScope)}
+                        className="px-3 py-2 bg-white border border-stone-300 rounded-lg font-semibold text-stone-800"
+                      >
+                        <option value="store">
+                          🏪 店铺共享模式（归属至本店铺 {DEFAULT_STORE_ID}，仅本店铺已授权成员可按权限访问）
+                        </option>
+                        <option value="personal">
+                          🔒 主理人个人隔离模式（归属至当前主理人 UID，普通个人隔离模式账号无法查看历史数据）
+                        </option>
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={migratingScope}
+                      onClick={handleExecuteScopeMigration}
+                      className="px-4 py-2.5 bg-stone-900 hover:bg-stone-800 text-white font-bold rounded-xl flex items-center space-x-1.5 cursor-pointer shrink-0 shadow-xs"
+                    >
+                      {migratingScope ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                      ) : (
+                        <Shield className="w-4 h-4 text-amber-400" />
+                      )}
+                      <span>
+                        {migratingScope
+                          ? '正在备份并执行安全归属迁移...'
+                          : '先自动备份并执行历史数据归属迁移'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* 1. 电脑、iPad、iPhone 实时同步与本地数据迁移 */}
           <div className="bg-white rounded-2xl border border-stone-200 p-5 shadow-xs space-y-4">
             <h3 className="text-sm font-bold text-stone-900 flex items-center space-x-2 border-b border-stone-100 pb-3">

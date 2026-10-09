@@ -168,21 +168,35 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
           <div className="hidden sm:block text-left">
-            <p className="text-xs font-bold text-stone-900 leading-tight">
-              {currentUser?.displayName || '工坊主裁'}
-            </p>
-            <p className="text-[10px] text-stone-400">
-              {currentRole?.name ||
+            <div className="flex items-center space-x-1.5">
+              <p className="text-xs font-bold text-stone-900 leading-tight">
+                {currentUser?.displayName || '工坊主裁'}
+              </p>
+              <span
+                className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                  currentUser?.accessScope === 'personal'
+                    ? 'bg-sky-50 text-sky-700 border border-sky-200'
+                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                }`}
+                title={`当前账号数据范围：${currentUser?.accessScope === 'personal' ? '个人隔离 (仅本人UID数据)' : '全店共享'} · Store: ${currentUser?.storeId || 'STORE_QICAI_DEFAULT'}`}
+              >
+                {currentUser?.accessScope === 'personal' ? '个人隔离' : '店铺共享'}
+              </span>
+            </div>
+            <p className="text-[10px] text-stone-400 font-mono">
+              {currentUser?.phone ||
+                currentRole?.name ||
                 currentUser?.roleName ||
                 (currentUser?.role === 'admin' ? '系统管理员/主理人' : '普通操作员')}
             </p>
           </div>
           <button
             onClick={signOut}
-            className="p-1.5 text-stone-400 hover:text-rose-600 hover:bg-stone-100 rounded-lg transition-colors cursor-pointer"
-            title="退出登录并清理敏感缓存"
+            className="px-2 py-1.5 text-stone-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer flex items-center space-x-1 border border-transparent hover:border-rose-200"
+            title="安全退出登录并清理本地敏感状态"
           >
             <LogOut className="w-4 h-4" />
+            <span className="text-xs font-semibold hidden md:inline">退出</span>
           </button>
         </div>
       </div>

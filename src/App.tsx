@@ -169,8 +169,8 @@ function MainApp() {
   };
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      // Clear all sensitive business states from React memory upon logout or unauthenticated state
+    if (!isAuthenticated || !currentUser) {
+      // Clear all sensitive business states and modals from React memory upon logout or unauthenticated state
       setCustomers([]);
       setMeasurements([]);
       setMaterials([]);
@@ -182,17 +182,40 @@ function MainApp() {
       setCustomerImages([]);
       setSelectedCustomer(null);
       setSelectedOrder(null);
+      setEditingCustomer(null);
+      setMeasurementTargetCustomer(null);
+      setPrintingMeasurement(null);
+      setPrintingCustomer(null);
+      setOrderTargetCustomer(null);
+      setPrintingOrder(null);
+      setRechargeTargetCustomer(null);
+      setInventoryTargetMaterial(null);
+      setArchiveTargetCustomer(null);
+      setPreviewFile(null);
+      setIsCustomerModalOpen(false);
+      setIsMeasurementModalOpen(false);
+      setIsMeasurementPrintOpen(false);
+      setIsCreateOrderOpen(false);
+      setIsOrderDetailOpen(false);
+      setIsOrderPrintOpen(false);
+      setIsRechargeModalOpen(false);
+      setIsInventoryModalOpen(false);
+      setIsArchiveUploadOpen(false);
+      setIsPdfPreviewOpen(false);
+      setIsGlobalSearchOpen(false);
+      setDeleteDialog(null);
+      setCurrentNav('workbench');
       return;
     }
 
     loadAllData();
 
-    // Establish real-time multi-device sync across PC, iPad, and iPhone
+    // Establish real-time multi-device sync across PC, iPad, and iPhone scoped to current user's accessScope & storeId
     const unsubscribeRealtime = storeService.subscribeToRealtimeUpdates({
       onCustomers: list => {
         const unique = dedupeById(list);
         setCustomers(unique);
-        setSelectedCustomer(prev => (prev ? unique.find(c => c.id === prev.id) || prev : null));
+        setSelectedCustomer(prev => (prev ? unique.find(c => c.id === prev.id) || null : null));
       },
       onMeasurements: list => {
         const unique = dedupeById(list);
@@ -211,7 +234,7 @@ function MainApp() {
       onOrders: list => {
         const unique = dedupeById(list);
         setOrders(unique);
-        setSelectedOrder(prev => (prev ? unique.find(o => o.id === prev.id) || prev : null));
+        setSelectedOrder(prev => (prev ? unique.find(o => o.id === prev.id) || null : null));
       },
       onWalletTransactions: list => setWalletTransactions(dedupeById(list)),
       onCustomerFiles: list => setCustomerFiles(dedupeById(list)),
@@ -230,7 +253,7 @@ function MainApp() {
     return () => {
       unsubscribeRealtime();
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, currentUser?.uid, currentUser?.storeId, currentUser?.accessScope, currentUser?.role]);
 
   // Keyboard shortcut: Cmd+K / Ctrl+K for Global Search
   useEffect(() => {
@@ -485,7 +508,7 @@ function MainApp() {
     setDeleteDialog({
       isOpen: true,
       title: `确认删除订单 #${order.orderId}`,
-      description: `即将删除客户「${order.customerName}」的定制订单（金额：¥${(order.finalAmount / 100).toFixed(2)}）。删除后会自动重算该客户的订单统计数据。确定要删除此订单吗？`,
+      description: `即将删除客户「${order.customerName}」的定制订单（金额：¥${(order.payableAmount / 100).toFixed(2)}）。删除后会自动重算该客户的订单统计数据。确定要删除此订单吗？`,
       confirmLabel: '确认删除订单',
       onConfirm: async () => {
         await storeService.deleteOrder(order.id);
@@ -508,7 +531,7 @@ function MainApp() {
     setDeleteDialog({
       isOpen: true,
       title: `确认删除面料「${material.name}」`,
-      description: `即将从面料台账中删除面料（编号：${material.materialCode}，品牌：${material.brand || '工坊甄选'}）。此操作不可恢复，确定要删除吗？`,
+      description: `即将从面料台账中删除面料（编号：${material.materialId}，品牌：${material.brand || '工坊甄选'}）。此操作不可恢复，确定要删除吗？`,
       confirmLabel: '确认删除面料',
       onConfirm: async () => {
         await storeService.deleteMaterial(material.id);

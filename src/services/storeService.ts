@@ -33,7 +33,13 @@ import {
   PaymentStage,
   RoleDefinition,
   StaffUser,
+  AuthorizedPhone,
+  DataAccessScope,
+  DEFAULT_STORE_ID,
+  LegacyDataInspectionSummary,
 } from '../types';
+export type { LegacyDataInspectionSummary };
+import { normalizePhoneToE164, validatePhoneNumber } from '../utils/phoneUtils';
 import {
   INITIAL_SETTINGS,
   SEED_CUSTOMERS,
@@ -67,40 +73,115 @@ function dedupeById<T extends { id: string }>(items: T[]): T[] {
 }
 
 class StoreService {
-  private inMemoryCustomers: Customer[] = [...SEED_CUSTOMERS];
-  private inMemoryMeasurements: Measurement[] = [...SEED_MEASUREMENTS];
-  private inMemoryMaterials: Material[] = [...SEED_MATERIALS];
-  private inMemoryInventoryTransactions: InventoryTransaction[] = [...SEED_INVENTORY_TRANSACTIONS];
-  private inMemoryStyles: Style[] = [...SEED_STYLES];
-  private inMemoryOrders: Order[] = [...SEED_ORDERS];
-  private inMemoryWallets: Map<string, Wallet> = new Map(SEED_WALLETS.map(w => [w.customerId, w]));
-  private inMemoryWalletTransactions: WalletTransaction[] = [...SEED_WALLET_TRANSACTIONS];
-  private inMemoryFiles: CustomerFile[] = [...SEED_CUSTOMER_FILES];
-  private inMemoryImages: CustomerImage[] = [...SEED_CUSTOMER_IMAGES];
+  // Unauthenticated initial memory is strictly empty so no sensitive data exists before login
+  private inMemoryCustomers: Customer[] = [];
+  private inMemoryMeasurements: Measurement[] = [];
+  private inMemoryMaterials: Material[] = [];
+  private inMemoryInventoryTransactions: InventoryTransaction[] = [];
+  private inMemoryStyles: Style[] = [];
+  private inMemoryOrders: Order[] = [];
+  private inMemoryWallets: Map<string, Wallet> = new Map();
+  private inMemoryWalletTransactions: WalletTransaction[] = [];
+  private inMemoryFiles: CustomerFile[] = [];
+  private inMemoryImages: CustomerImage[] = [];
   private inMemorySettings: StoreSetting = { ...INITIAL_SETTINGS };
   private inMemoryAuditLogs: AuditLog[] = [];
   private inMemoryRoles: RoleDefinition[] = [...SEED_ROLES];
-  private inMemoryOperators: StaffUser[] = [...SEED_OPERATORS];
-  private currentOperator: { uid: string; name: string } = { uid: 'staff-01', name: '刘振海 (主理人/总裁缝师)' };
+  private inMemoryOperators: StaffUser[] = [];
+  private inMemoryAuthorizedPhones: AuthorizedPhone[] = [];
+  private currentOperator: {
+    uid: string;
+    name: string;
+    role: 'admin' | 'staff';
+    storeId: string;
+    accessScope: DataAccessScope;
+  } = {
+    uid: '',
+    name: '',
+    role: 'staff',
+    storeId: DEFAULT_STORE_ID,
+    accessScope: 'store',
+  };
   private isInitialized = false;
 
   constructor() {
-    this.loadFromLocalStorage();
+    // Do not pre-load sensitive customer records into memory before authentication
   }
 
-  public setCurrentOperator(uid: string, name: string) {
-    this.currentOperator = { uid, name };
+  public setCurrentOperator(
+    uid: string,
+    name: string,
+    storeId: string = DEFAULT_STORE_ID,
+    accessScope: DataAccessScope = 'store',
+    role: 'admin' | 'staff' = 'staff'
+  ) {
+    this.currentOperator = {
+      uid,
+      name,
+      role,
+      storeId: storeId || DEFAULT_STORE_ID,
+      accessScope: accessScope || 'store',
+    };
+    storageService.setStorageScope(this.currentOperator.storeId, uid, this.currentOperator.accessScope, role);
+  }
+
+  public getCurrentOperatorContext() {
+    return { ...this.currentOperator };
+  }
+
+  /**
+   * 账号级与店铺级数据访问范围校验
+   * 1. 未登录用户严禁访问任何业务记录
+   * 2. 尚未完成归属迁移的历史旧数据（无 storeId 字段）仅限管理员读取与迁移，绝不暴露给新普通账号
+   * 3. 已归属数据必须匹配当前账号的 storeId
+   * 4. 若当前账号处于个人数据隔离模式 (accessScope === 'personal')，则仅能访问 ownerUid === 当前用户 UID 的记录
+   */
+  public canAccessRecord(record?: { storeId?: string; ownerUid?: string } | null): boolean {
+    if (!record) return false;
+    const activeUid = auth.currentUser?.uid || this.currentOperator.uid;
+    if (!activeUid) return false;
+
+    const isAdmin = this.currentOperator.role === 'admin';
+    const userStoreId = this.currentOperator.storeId || DEFAULT_STORE_ID;
+    const scope = this.currentOperator.accessScope || 'store';
+
+    // Unmigrated legacy data without storeId is strictly isolated to Admin only until migration completes
+    if (!record.storeId) {
+      return isAdmin;
+    }
+
+    if (record.storeId !== userStoreId) {
+      return false;
+    }
+
+    if (!isAdmin && scope === 'personal') {
+      return !!record.ownerUid && record.ownerUid === activeUid;
+    }
+
+    return true;
   }
 
   public clearSensitiveMemory() {
     this.inMemoryCustomers = [];
     this.inMemoryMeasurements = [];
+    this.inMemoryMaterials = [];
+    this.inMemoryInventoryTransactions = [];
+    this.inMemoryStyles = [];
     this.inMemoryOrders = [];
     this.inMemoryWallets.clear();
     this.inMemoryWalletTransactions = [];
     this.inMemoryFiles = [];
     this.inMemoryImages = [];
     this.inMemoryAuditLogs = [];
+    this.inMemoryOperators = [];
+    this.inMemoryAuthorizedPhones = [];
+    this.currentOperator = {
+      uid: '',
+      name: '',
+      role: 'staff',
+      storeId: DEFAULT_STORE_ID,
+      accessScope: 'store',
+    };
     this.isInitialized = false;
     storageService.clearMemoryCache();
   }
@@ -154,69 +235,59 @@ class StoreService {
   // Ensure initial seed documents exist in Firestore
   public async initializeDatabase() {
     if (this.isInitialized) return;
+    if (!auth.currentUser) return;
     try {
+      this.loadFromLocalStorage();
+      const activeUid = auth.currentUser.uid;
+      const activeStoreId = this.currentOperator.storeId || DEFAULT_STORE_ID;
+      const isAdmin = this.currentOperator.role === 'admin';
+
       const settingsRef = doc(db, 'settings', 'default');
       const snap = await getDoc(settingsRef);
-      if (!snap.exists()) {
-        await setDoc(settingsRef, this.inMemorySettings);
-        // Seed initial customers
+      if (!snap.exists() && isAdmin) {
+        await setDoc(settingsRef, {
+          ...this.inMemorySettings,
+          storeId: activeStoreId,
+          ownerUid: activeUid,
+        });
+        // Seed initial customers only when an empty database is first initialized by Admin
         for (const c of SEED_CUSTOMERS) {
-          await setDoc(doc(db, 'customers', c.id), c);
+          await setDoc(doc(db, 'customers', c.id), { ...c, storeId: activeStoreId, ownerUid: activeUid });
         }
         for (const m of SEED_MEASUREMENTS) {
-          await setDoc(doc(db, 'measurements', m.id), m);
+          await setDoc(doc(db, 'measurements', m.id), { ...m, storeId: activeStoreId, ownerUid: activeUid });
         }
         for (const mat of SEED_MATERIALS) {
-          await setDoc(doc(db, 'materials', mat.id), mat);
+          await setDoc(doc(db, 'materials', mat.id), { ...mat, storeId: activeStoreId, ownerUid: activeUid });
         }
         for (const s of SEED_STYLES) {
-          await setDoc(doc(db, 'styles', s.id), s);
+          await setDoc(doc(db, 'styles', s.id), { ...s, storeId: activeStoreId, ownerUid: activeUid });
         }
         for (const o of SEED_ORDERS) {
-          await setDoc(doc(db, 'orders', o.id), o);
+          await setDoc(doc(db, 'orders', o.id), { ...o, storeId: activeStoreId, ownerUid: activeUid });
         }
         for (const w of SEED_WALLETS) {
-          await setDoc(doc(db, 'wallets', w.id), w);
+          await setDoc(doc(db, 'wallets', w.id), { ...w, storeId: activeStoreId, ownerUid: activeUid });
         }
         for (const wt of SEED_WALLET_TRANSACTIONS) {
-          await setDoc(doc(db, 'walletTransactions', wt.id), wt);
+          await setDoc(doc(db, 'walletTransactions', wt.id), { ...wt, storeId: activeStoreId, ownerUid: activeUid });
         }
         for (const cf of SEED_CUSTOMER_FILES) {
-          await setDoc(doc(db, 'customerFiles', cf.id), cf);
+          await setDoc(doc(db, 'customerFiles', cf.id), { ...cf, storeId: activeStoreId, ownerUid: activeUid });
         }
         for (const ci of SEED_CUSTOMER_IMAGES) {
-          await setDoc(doc(db, 'customerImages', ci.id), ci);
+          await setDoc(doc(db, 'customerImages', ci.id), { ...ci, storeId: activeStoreId, ownerUid: activeUid });
         }
       }
-      // Ensure default roles and owner whitelist exist in Firestore
-      for (const r of SEED_ROLES) {
-        const rSnap = await getDoc(doc(db, 'roles', r.id));
-        if (!rSnap.exists()) {
-          await setDoc(doc(db, 'roles', r.id), r);
-        }
-      }
-      for (const op of SEED_OPERATORS) {
-        const opSnap = await getDoc(doc(db, 'users', op.uid));
-        if (!opSnap.exists()) {
-          await setDoc(doc(db, 'users', op.uid), op);
-        }
-        if (op.email) {
-          const emailKey = op.email.trim().toLowerCase();
-          const allowSnap = await getDoc(doc(db, 'allowedEmails', emailKey));
-          if (!allowSnap.exists()) {
-            await setDoc(doc(db, 'allowedEmails', emailKey), {
-              email: emailKey,
-              role: op.role,
-              status: op.status,
-              operatorId: op.uid,
-              updatedAt: new Date().toISOString(),
-            });
+      // Ensure default roles exist in Firestore
+      if (isAdmin) {
+        for (const r of SEED_ROLES) {
+          const rSnap = await getDoc(doc(db, 'roles', r.id));
+          if (!rSnap.exists()) {
+            await setDoc(doc(db, 'roles', r.id), r);
           }
         }
       }
-
-      // Automatically back up and migrate any locally-saved records to Firestore
-      await this.migrateLocalDataToCloud(false);
 
       this.isInitialized = true;
     } catch (error) {
@@ -344,7 +415,7 @@ class StoreService {
     operatorId?: string,
     result: 'success' | 'failure' = 'success'
   ) {
-    const opId = operatorId || this.currentOperator.uid || 'staff-01';
+    const opId = operatorId || auth.currentUser?.uid || this.currentOperator.uid || 'system';
     const opName = this.currentOperator.name || '工坊管理员';
     const log: AuditLog = {
       id: `LOG-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -357,6 +428,8 @@ class StoreService {
       timestamp: new Date().toISOString(),
       details,
       result,
+      storeId: this.currentOperator.storeId || DEFAULT_STORE_ID,
+      ownerUid: opId,
     };
     this.inMemoryAuditLogs.unshift(log);
     try {
@@ -393,6 +466,7 @@ class StoreService {
 
   // --- Customers ---
   public async getCustomers(): Promise<Customer[]> {
+    if (!auth.currentUser) return [];
     try {
       const colRef = collection(db, 'customers');
       const snap = await getDocs(colRef);
@@ -400,30 +474,37 @@ class StoreService {
         const list: Customer[] = [];
         snap.forEach(d => {
           const data = d.data() as Customer;
-          if (!data.isDeleted) list.push({ ...data, id: data.id || d.id });
+          if (!data.isDeleted && this.canAccessRecord(data)) {
+            list.push({ ...data, id: data.id || d.id });
+          }
         });
         this.inMemoryCustomers = dedupeById(list);
       }
     } catch (e) {
       // fallback
     }
-    return dedupeById(this.inMemoryCustomers.filter(c => !c.isDeleted));
+    return dedupeById(this.inMemoryCustomers.filter(c => !c.isDeleted && this.canAccessRecord(c)));
   }
 
   public async getCustomerById(id: string): Promise<Customer | null> {
+    if (!auth.currentUser) return null;
     try {
       const snap = await getDoc(doc(db, 'customers', id));
       if (snap.exists()) {
         const data = snap.data() as Customer;
-        if (!data.isDeleted) return data;
+        if (!data.isDeleted && this.canAccessRecord(data)) return data;
+        return null;
       }
     } catch (e) {
       // fallback
     }
-    return this.inMemoryCustomers.find(c => c.id === id && !c.isDeleted) || null;
+    return this.inMemoryCustomers.find(c => c.id === id && !c.isDeleted && this.canAccessRecord(c)) || null;
   }
 
   public async createCustomer(customerData: Omit<Customer, 'id' | 'customerId' | 'orderCount' | 'totalSpent' | 'walletBalance' | 'isDeleted' | 'createdAt' | 'updatedAt'>): Promise<Customer> {
+    if (!auth.currentUser) throw new Error('未登录或会话已过期，严禁创建客户资料');
+    const activeUid = auth.currentUser.uid;
+    const activeStoreId = this.currentOperator.storeId || DEFAULT_STORE_ID;
     const yearPrefix = `C${new Date().getFullYear()}`;
     const maxSeq = this.inMemoryCustomers.reduce((max, c) => {
       if (c.id && c.id.startsWith(yearPrefix)) {
@@ -443,11 +524,13 @@ class StoreService {
       totalSpent: 0,
       walletBalance: 0,
       isDeleted: false,
+      storeId: activeStoreId,
+      ownerUid: activeUid,
       createdAt: now,
       updatedAt: now,
     };
 
-    // Also initialize wallet
+    // Also initialize wallet with same scope
     const newWallet: Wallet = {
       id: cid,
       customerId: cid,
@@ -455,6 +538,8 @@ class StoreService {
       totalRecharged: 0,
       totalConsumed: 0,
       version: 1,
+      storeId: activeStoreId,
+      ownerUid: activeUid,
       updatedAt: now,
     };
 
@@ -550,6 +635,7 @@ class StoreService {
 
   // --- Measurements ---
   public async getMeasurementsByCustomerId(customerId: string): Promise<Measurement[]> {
+    if (!auth.currentUser) return [];
     try {
       const q = query(
         collection(db, 'measurements'),
@@ -560,7 +646,9 @@ class StoreService {
         const list: Measurement[] = [];
         snap.forEach(d => {
           const data = d.data() as Measurement;
-          list.push({ ...data, id: data.id || d.id, unit: data.unit || '尺' });
+          if (this.canAccessRecord(data)) {
+            list.push({ ...data, id: data.id || d.id, unit: data.unit || '尺' });
+          }
         });
         list.sort((a, b) => new Date(b.measureDate).getTime() - new Date(a.measureDate).getTime());
         return dedupeById(list);
@@ -570,18 +658,21 @@ class StoreService {
     }
     return dedupeById(
       this.inMemoryMeasurements
-        .filter(m => m.customerId === customerId)
+        .filter(m => m.customerId === customerId && this.canAccessRecord(m))
         .sort((a, b) => new Date(b.measureDate).getTime() - new Date(a.measureDate).getTime())
     );
   }
 
   public async createMeasurement(data: Omit<Measurement, 'id' | 'measurementId' | 'createdAt'>): Promise<Measurement> {
+    if (!auth.currentUser) throw new Error('未登录或会话已过期，严禁创建量体记录');
     const id = `M-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}${Math.random().toString(36).slice(2, 4).toUpperCase()}`;
     const newMeasurement: Measurement = {
       ...data,
       unit: data.unit || '尺',
       id,
       measurementId: id,
+      storeId: this.currentOperator.storeId || DEFAULT_STORE_ID,
+      ownerUid: auth.currentUser.uid,
       createdAt: new Date().toISOString(),
     };
 
@@ -649,33 +740,40 @@ class StoreService {
 
   // --- Materials & Inventory ---
   public async getMaterials(): Promise<Material[]> {
+    if (!auth.currentUser) return [];
     try {
       const snap = await getDocs(collection(db, 'materials'));
       if (!snap.empty) {
         const list: Material[] = [];
         snap.forEach(d => {
           const mat = d.data() as Material;
-          if (!mat.isDeleted) list.push({ ...mat, id: mat.id || d.id });
+          if (!mat.isDeleted && this.canAccessRecord(mat)) {
+            list.push({ ...mat, id: mat.id || d.id });
+          }
         });
         this.inMemoryMaterials = dedupeById(list);
       }
     } catch (e) {
       // fallback
     }
-    return dedupeById(this.inMemoryMaterials.filter(m => !m.isDeleted));
+    return dedupeById(this.inMemoryMaterials.filter(m => !m.isDeleted && this.canAccessRecord(m)));
   }
 
   public async getMaterialById(id: string): Promise<Material | null> {
-    return this.inMemoryMaterials.find(m => m.id === id && !m.isDeleted) || null;
+    if (!auth.currentUser) return null;
+    return this.inMemoryMaterials.find(m => m.id === id && !m.isDeleted && this.canAccessRecord(m)) || null;
   }
 
   public async createMaterial(materialData: Omit<Material, 'id' | 'materialId' | 'isDeleted' | 'updatedAt'>): Promise<Material> {
+    if (!auth.currentUser) throw new Error('未登录或会话已过期，严禁创建面料档案');
     const id = `MAT-${Date.now().toString().slice(-4)}${Math.random().toString(36).slice(2, 4).toUpperCase()}`;
     const newMaterial: Material = {
       ...materialData,
       id,
       materialId: id,
       isDeleted: false,
+      storeId: this.currentOperator.storeId || DEFAULT_STORE_ID,
+      ownerUid: auth.currentUser.uid,
       updatedAt: new Date().toISOString(),
     };
     this.inMemoryMaterials = dedupeById([newMaterial, ...this.inMemoryMaterials]);
@@ -753,30 +851,36 @@ class StoreService {
   }
 
   public async getInventoryTransactions(materialId?: string): Promise<InventoryTransaction[]> {
+    if (!auth.currentUser) return [];
     try {
       const snap = await getDocs(collection(db, 'inventoryTransactions'));
       if (!snap.empty) {
         const list: InventoryTransaction[] = [];
         snap.forEach(d => {
           const data = d.data() as InventoryTransaction;
-          list.push({ ...data, id: data.id || d.id });
+          if (this.canAccessRecord(data)) {
+            list.push({ ...data, id: data.id || d.id });
+          }
         });
         this.inMemoryInventoryTransactions = dedupeById(list);
       }
     } catch (e) {
       // fallback
     }
-    let res = dedupeById(this.inMemoryInventoryTransactions);
+    let res = dedupeById(this.inMemoryInventoryTransactions.filter(t => this.canAccessRecord(t)));
     if (materialId) res = res.filter(t => t.materialId === materialId);
     return res.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   public async createInventoryTransaction(data: Omit<InventoryTransaction, 'id' | 'transactionId' | 'createdAt'>): Promise<InventoryTransaction> {
+    if (!auth.currentUser) throw new Error('未登录或会话已过期');
     const tid = `INV-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${Date.now().toString().slice(-4)}${Math.random().toString(36).slice(2, 4).toUpperCase()}`;
     const newTx: InventoryTransaction = {
       ...data,
       id: tid,
       transactionId: tid,
+      storeId: this.currentOperator.storeId || DEFAULT_STORE_ID,
+      ownerUid: auth.currentUser.uid,
       createdAt: new Date().toISOString(),
     };
     this.inMemoryInventoryTransactions = dedupeById([newTx, ...this.inMemoryInventoryTransactions]);
@@ -808,28 +912,34 @@ class StoreService {
 
   // --- Styles ---
   public async getStyles(): Promise<Style[]> {
+    if (!auth.currentUser) return [];
     try {
       const snap = await getDocs(collection(db, 'styles'));
       if (!snap.empty) {
         const list: Style[] = [];
         snap.forEach(d => {
           const data = d.data() as Style;
-          list.push({ ...data, id: data.id || d.id });
+          if (this.canAccessRecord(data)) {
+            list.push({ ...data, id: data.id || d.id });
+          }
         });
         this.inMemoryStyles = dedupeById(list);
       }
     } catch (e) {
       // fallback
     }
-    return dedupeById(this.inMemoryStyles);
+    return dedupeById(this.inMemoryStyles.filter(s => this.canAccessRecord(s)));
   }
 
   public async createStyle(styleData: Omit<Style, 'id' | 'styleId' | 'createdAt'>): Promise<Style> {
+    if (!auth.currentUser) throw new Error('未登录或会话已过期');
     const id = `STY-${Date.now().toString().slice(-4)}${Math.random().toString(36).slice(2, 4).toUpperCase()}`;
     const newStyle: Style = {
       ...styleData,
       id,
       styleId: id,
+      storeId: this.currentOperator.storeId || DEFAULT_STORE_ID,
+      ownerUid: auth.currentUser.uid,
       createdAt: new Date().toISOString(),
     };
     this.inMemoryStyles = dedupeById([newStyle, ...this.inMemoryStyles]);
@@ -864,26 +974,30 @@ class StoreService {
 
   // --- Orders ---
   public async getOrders(customerId?: string): Promise<Order[]> {
+    if (!auth.currentUser) return [];
     try {
       const snap = await getDocs(collection(db, 'orders'));
       if (!snap.empty) {
         const list: Order[] = [];
         snap.forEach(d => {
           const data = d.data() as Order;
-          list.push({ ...data, id: data.id || d.id });
+          if (this.canAccessRecord(data)) {
+            list.push({ ...data, id: data.id || d.id });
+          }
         });
         this.inMemoryOrders = dedupeById(list);
       }
     } catch (e) {
       // fallback
     }
-    let res = dedupeById(this.inMemoryOrders);
+    let res = dedupeById(this.inMemoryOrders.filter(o => this.canAccessRecord(o)));
     if (customerId) res = res.filter(o => o.customerId === customerId);
     return res.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   public async getOrderById(orderId: string): Promise<Order | null> {
-    return this.inMemoryOrders.find(o => o.id === orderId || o.orderId === orderId) || null;
+    if (!auth.currentUser) return null;
+    return this.inMemoryOrders.find(o => (o.id === orderId || o.orderId === orderId) && this.canAccessRecord(o)) || null;
   }
 
   public async createOrder(orderPayload: {
@@ -965,7 +1079,7 @@ class StoreService {
       statusHistory: [
         {
           status: 'placed',
-          operatorId: orderPayload.operatorId || 'staff-01',
+          operatorId: orderPayload.operatorId || auth.currentUser?.uid || 'staff-01',
           timestamp: now,
           note: `订单创建并已收取定金/全款 ¥${(paidAmount / 100).toFixed(2)}`,
         },
@@ -973,7 +1087,9 @@ class StoreService {
       items,
       payments,
       remarks: orderPayload.remarks,
-      operatorId: orderPayload.operatorId || 'staff-01',
+      operatorId: orderPayload.operatorId || auth.currentUser?.uid || 'staff-01',
+      storeId: this.currentOperator.storeId || DEFAULT_STORE_ID,
+      ownerUid: auth.currentUser?.uid || this.currentOperator.uid,
       createdAt: now,
       updatedAt: now,
     };
@@ -1120,6 +1236,8 @@ class StoreService {
 
   // --- Wallets & Transactions (Atomic Ledger) ---
   public async getWallet(customerId: string): Promise<Wallet> {
+    const activeStoreId = this.currentOperator.storeId || DEFAULT_STORE_ID;
+    const activeUid = auth.currentUser?.uid || this.currentOperator.uid;
     let wallet = this.inMemoryWallets.get(customerId);
     if (!wallet) {
       wallet = {
@@ -1129,6 +1247,8 @@ class StoreService {
         totalRecharged: 0,
         totalConsumed: 0,
         version: 1,
+        storeId: activeStoreId,
+        ownerUid: activeUid,
         updatedAt: new Date().toISOString(),
       };
       this.inMemoryWallets.set(customerId, wallet);
@@ -1138,8 +1258,10 @@ class StoreService {
       const snap = await getDoc(doc(db, 'wallets', customerId));
       if (snap.exists()) {
         const remote = snap.data() as Wallet;
-        this.inMemoryWallets.set(customerId, remote);
-        return remote;
+        if (this.canAccessRecord(remote)) {
+          this.inMemoryWallets.set(customerId, remote);
+          return remote;
+        }
       }
     } catch (e) {
       // fallback
@@ -1148,20 +1270,23 @@ class StoreService {
   }
 
   public async getWalletTransactions(customerId?: string): Promise<WalletTransaction[]> {
+    if (!auth.currentUser) return [];
     try {
       const snap = await getDocs(collection(db, 'walletTransactions'));
       if (!snap.empty) {
         const list: WalletTransaction[] = [];
         snap.forEach(d => {
           const data = d.data() as WalletTransaction;
-          list.push({ ...data, id: data.id || d.id });
+          if (this.canAccessRecord(data)) {
+            list.push({ ...data, id: data.id || d.id });
+          }
         });
         this.inMemoryWalletTransactions = dedupeById(list);
       }
     } catch (e) {
       // fallback
     }
-    let res = dedupeById(this.inMemoryWalletTransactions);
+    let res = dedupeById(this.inMemoryWalletTransactions.filter(w => this.canAccessRecord(w)));
     if (customerId) res = res.filter(w => w.customerId === customerId);
     return res.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
@@ -1174,11 +1299,14 @@ class StoreService {
     remarks: string,
     operatorId = 'staff-01'
   ): Promise<WalletTransaction> {
+    if (!auth.currentUser) throw new Error('未登录或会话已过期');
     if (amount <= 0) throw new Error('充值金额必须大于零');
 
     const customer = await this.getCustomerById(customerId);
-    if (!customer) throw new Error('客户不存在');
+    if (!customer) throw new Error('客户不存在或无权访问');
 
+    const activeStoreId = this.currentOperator.storeId || DEFAULT_STORE_ID;
+    const activeUid = auth.currentUser.uid;
     const wallet = await this.getWallet(customerId);
     const balanceBefore = wallet.balance;
     const balanceAfter = balanceBefore + amount;
@@ -1195,7 +1323,9 @@ class StoreService {
       balanceBefore,
       balanceAfter,
       paymentMethod,
-      operatorId,
+      operatorId: activeUid || operatorId,
+      storeId: activeStoreId,
+      ownerUid: customer.ownerUid || activeUid,
       createdAt: now,
       remarks,
     };
@@ -1204,6 +1334,8 @@ class StoreService {
     wallet.balance = balanceAfter;
     wallet.totalRecharged += amount;
     wallet.version += 1;
+    wallet.storeId = activeStoreId;
+    wallet.ownerUid = customer.ownerUid || activeUid;
     wallet.updatedAt = now;
     customer.walletBalance = balanceAfter;
 
@@ -1223,6 +1355,8 @@ class StoreService {
           totalRecharged: wallet.totalRecharged,
           totalConsumed: wallet.totalConsumed,
           version: wallet.version,
+          storeId: activeStoreId,
+          ownerUid: customer.ownerUid || activeUid,
           updatedAt: now,
         });
         transaction.set(doc(db, 'walletTransactions', tid), newTx);
@@ -1247,11 +1381,14 @@ class StoreService {
     remarks: string,
     operatorId = 'staff-01'
   ): Promise<WalletTransaction> {
+    if (!auth.currentUser) throw new Error('未登录或会话已过期');
     if (amount <= 0) throw new Error('扣款金额必须大于零');
 
     const customer = await this.getCustomerById(customerId);
-    if (!customer) throw new Error('客户不存在');
+    if (!customer) throw new Error('客户不存在或无权访问');
 
+    const activeStoreId = this.currentOperator.storeId || DEFAULT_STORE_ID;
+    const activeUid = auth.currentUser.uid;
     const wallet = await this.getWallet(customerId);
     if (wallet.balance < amount) {
       throw new Error(`储值余额不足，当前余额 ¥${(wallet.balance / 100).toFixed(2)}，本次需支付 ¥${(amount / 100).toFixed(2)}`);
@@ -1273,7 +1410,9 @@ class StoreService {
       balanceAfter,
       paymentMethod: 'wallet',
       relatedOrderId,
-      operatorId,
+      operatorId: activeUid || operatorId,
+      storeId: activeStoreId,
+      ownerUid: customer.ownerUid || activeUid,
       createdAt: now,
       remarks,
     };
@@ -1345,7 +1484,9 @@ class StoreService {
       balanceAfter,
       paymentMethod: 'wallet',
       relatedOrderId,
-      operatorId,
+      operatorId: auth.currentUser?.uid || operatorId,
+      storeId: this.currentOperator.storeId || DEFAULT_STORE_ID,
+      ownerUid: customer.ownerUid || auth.currentUser?.uid || this.currentOperator.uid,
       createdAt: now,
       remarks,
     };
@@ -1382,33 +1523,39 @@ class StoreService {
 
   // --- Archives (CustomerFiles) ---
   public async getCustomerFiles(customerId?: string): Promise<CustomerFile[]> {
+    if (!auth.currentUser) return [];
     try {
       const snap = await getDocs(collection(db, 'customerFiles'));
       if (!snap.empty) {
         const list: CustomerFile[] = [];
         snap.forEach(d => {
           const data = d.data() as CustomerFile;
-          list.push({ ...data, id: data.id || d.id });
+          if (this.canAccessRecord(data)) {
+            list.push({ ...data, id: data.id || d.id });
+          }
         });
         this.inMemoryFiles = dedupeById(list);
       }
     } catch (e) {
       // fallback
     }
-    let res = dedupeById(this.inMemoryFiles);
+    let res = dedupeById(this.inMemoryFiles.filter(f => this.canAccessRecord(f)));
     if (customerId) res = res.filter(f => f.customerId === customerId);
     return res.sort((a, b) => b.year - a.year || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   public async createCustomerFile(fileData: Omit<CustomerFile, 'id' | 'fileId' | 'createdAt'>): Promise<CustomerFile> {
+    if (!auth.currentUser) throw new Error('未登录或会话已过期，严禁上传档案');
     const id = `FILE-${fileData.year}-${Date.now().toString().slice(-6)}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
     const now = new Date().toISOString();
     const newFile: CustomerFile = {
       ...fileData,
       id,
       fileId: id,
-      operatorId: fileData.operatorId || this.currentOperator.uid || 'staff-01',
+      operatorId: auth.currentUser.uid || fileData.operatorId || this.currentOperator.uid,
       operatorName: fileData.operatorName || this.currentOperator.name || '工坊管理员',
+      storeId: this.currentOperator.storeId || DEFAULT_STORE_ID,
+      ownerUid: auth.currentUser.uid,
       createdAt: now,
       updatedAt: now,
     };
@@ -1455,6 +1602,7 @@ class StoreService {
 
   // --- Customer Images ---
   public async getCustomerImages(customerId: string): Promise<CustomerImage[]> {
+    if (!auth.currentUser) return [];
     try {
       const q = query(collection(db, 'customerImages'), where('customerId', '==', customerId));
       const snap = await getDocs(q);
@@ -1462,22 +1610,27 @@ class StoreService {
         const list: CustomerImage[] = [];
         snap.forEach(d => {
           const data = d.data() as CustomerImage;
-          list.push({ ...data, id: data.id || d.id });
+          if (this.canAccessRecord(data)) {
+            list.push({ ...data, id: data.id || d.id });
+          }
         });
         return dedupeById(list);
       }
     } catch (e) {
       // fallback
     }
-    return dedupeById(this.inMemoryImages.filter(i => i.customerId === customerId));
+    return dedupeById(this.inMemoryImages.filter(i => i.customerId === customerId && this.canAccessRecord(i)));
   }
 
   public async createCustomerImage(data: Omit<CustomerImage, 'id' | 'imageId' | 'createdAt'>): Promise<CustomerImage> {
+    if (!auth.currentUser) throw new Error('未登录或会话已过期');
     const id = `IMG-${Date.now().toString().slice(-4)}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
     const newImg: CustomerImage = {
       ...data,
       id,
       imageId: id,
+      storeId: this.currentOperator.storeId || DEFAULT_STORE_ID,
+      ownerUid: auth.currentUser.uid,
       createdAt: new Date().toISOString(),
     };
     this.inMemoryImages = dedupeById([newImg, ...this.inMemoryImages]);
@@ -1507,14 +1660,23 @@ class StoreService {
     }
   }
 
-  // --- Operators (Staff Users) & Roles Management ---
+  // --- Operators (Staff Users), Authorized Phones & Roles Management ---
   public async getOperators(): Promise<StaffUser[]> {
+    if (!auth.currentUser) return [];
     try {
       const snap = await getDocs(collection(db, 'users'));
       if (!snap.empty) {
         const list: StaffUser[] = [];
-        snap.forEach(d => list.push(d.data() as StaffUser));
-        this.inMemoryOperators = list;
+        snap.forEach(d => {
+          const op = d.data() as StaffUser;
+          list.push({
+            ...op,
+            uid: op.uid || d.id,
+            storeId: op.storeId || DEFAULT_STORE_ID,
+            accessScope: op.accessScope || 'store',
+          });
+        });
+        this.inMemoryOperators = dedupeById(list.map(o => ({ ...o, id: o.uid }))).map(({ id, ...rest }) => rest as StaffUser);
       }
     } catch {
       // fallback
@@ -1522,37 +1684,142 @@ class StoreService {
     return this.inMemoryOperators;
   }
 
-  public async saveOperator(operator: StaffUser, isNew = false): Promise<StaffUser> {
-    const cleanEmail = operator.email.trim().toLowerCase();
-    if (!cleanEmail) {
-      throw new Error('登录账号（邮箱）不能为空');
+  public async getAuthorizedPhones(): Promise<AuthorizedPhone[]> {
+    if (!auth.currentUser) return [];
+    try {
+      const snap = await getDocs(collection(db, 'authorizedPhones'));
+      if (!snap.empty) {
+        const list: AuthorizedPhone[] = [];
+        snap.forEach(d => {
+          const item = d.data() as AuthorizedPhone;
+          list.push({
+            ...item,
+            phone: item.phone || d.id,
+            storeId: item.storeId || DEFAULT_STORE_ID,
+            accessScope: item.accessScope || 'store',
+          });
+        });
+        this.inMemoryAuthorizedPhones = list;
+      } else {
+        this.inMemoryAuthorizedPhones = [];
+      }
+    } catch {
+      // fallback
+    }
+    return this.inMemoryAuthorizedPhones;
+  }
+
+  public async saveOperator(
+    operator: StaffUser & { countryCode?: string },
+    isNew = false
+  ): Promise<StaffUser> {
+    if (!auth.currentUser || this.currentOperator.role !== 'admin') {
+      throw new Error('权限不足：仅激活状态的系统管理员可添加或修改授权账号');
     }
 
-    // Uniqueness validation on email
+    const rawPhone = (operator.phone || operator.e164Phone || '').trim();
+    const cleanEmail = (operator.email || '').trim().toLowerCase();
+
+    if (!rawPhone && !cleanEmail) {
+      throw new Error('请填写授权登录手机号码（必填）或授权邮箱');
+    }
+
+    let e164Phone = '';
+    if (rawPhone) {
+      const phoneCheck = validatePhoneNumber(rawPhone, operator.countryCode || '+86');
+      if (!phoneCheck.valid) {
+        throw new Error(phoneCheck.message || '手机号码格式不正确');
+      }
+      e164Phone = phoneCheck.e164;
+    }
+
     const existingList = await this.getOperators();
-    const duplicate = existingList.find(
-      op => op.email.trim().toLowerCase() === cleanEmail && op.uid !== operator.uid
-    );
-    if (duplicate) {
-      throw new Error(`登录账号 "${cleanEmail}" 已被操作员 "${duplicate.displayName}" 使用，请保持账号唯一`);
+    if (e164Phone) {
+      const dupPhone = existingList.find(
+        op =>
+          normalizePhoneToE164(op.e164Phone || op.phone || '') === e164Phone &&
+          op.uid !== operator.uid
+      );
+      if (dupPhone) {
+        throw new Error(`手机号 "${e164Phone}" 已绑定给操作员 "${dupPhone.displayName}"，每个手机号仅能绑定唯一账号`);
+      }
+    }
+
+    if (cleanEmail) {
+      const dupEmail = existingList.find(
+        op => op.email && op.email.trim().toLowerCase() === cleanEmail && op.uid !== operator.uid
+      );
+      if (dupEmail) {
+        throw new Error(`邮箱 "${cleanEmail}" 已被操作员 "${dupEmail.displayName}" 使用`);
+      }
     }
 
     const now = new Date().toISOString();
+    const targetStoreId = operator.storeId || this.currentOperator.storeId || DEFAULT_STORE_ID;
+    const targetScope: DataAccessScope = operator.accessScope || 'store';
+
     const payload: StaffUser = {
-      ...operator,
+      uid: operator.uid,
       email: cleanEmail,
+      displayName: operator.displayName.trim(),
+      phone: e164Phone || rawPhone,
+      e164Phone: e164Phone || undefined,
+      avatarUrl: operator.avatarUrl || '',
+      position: operator.position || (operator.role === 'admin' ? '工坊管理员' : '定制工坊操作员'),
+      role: operator.role,
+      roleId: operator.roleId || (operator.role === 'admin' ? 'role-admin' : 'role-staff'),
+      roleName: operator.roleName || (operator.role === 'admin' ? '系统管理员' : '普通操作员'),
+      status: operator.status,
+      storeId: targetStoreId,
+      accessScope: targetScope,
+      boundUid: operator.boundUid || (operator.uid.startsWith('staff-') ? undefined : operator.uid),
       createdAt: operator.createdAt || now,
+      lastLoginAt: operator.lastLoginAt,
       updatedAt: now,
     };
 
     await setDoc(doc(db, 'users', payload.uid), payload, { merge: true });
-    await setDoc(doc(db, 'allowedEmails', cleanEmail), {
-      email: cleanEmail,
-      role: payload.role,
-      status: payload.status,
-      operatorId: payload.uid,
-      updatedAt: now,
-    });
+
+    // Write authorizedPhone record for Firebase Phone Auth verification & UID binding
+    if (e164Phone) {
+      const authPhoneDoc: AuthorizedPhone = {
+        phone: e164Phone,
+        displayName: payload.displayName,
+        position: payload.position,
+        email: cleanEmail || undefined,
+        role: payload.role,
+        roleId: payload.roleId || 'role-staff',
+        roleName: payload.roleName || '普通操作员',
+        status: payload.status,
+        storeId: targetStoreId,
+        accessScope: targetScope,
+        boundUid: payload.boundUid || null,
+        operatorId: payload.uid,
+        authorizedByUid: auth.currentUser.uid,
+        authorizedByName: this.currentOperator.name,
+        createdAt: operator.createdAt || now,
+        updatedAt: now,
+      };
+      await setDoc(doc(db, 'authorizedPhones', e164Phone), authPhoneDoc, { merge: true });
+    }
+
+    // Write allowedEmails record if email is provided
+    if (cleanEmail) {
+      await setDoc(
+        doc(db, 'allowedEmails', cleanEmail),
+        {
+          email: cleanEmail,
+          phone: e164Phone || '',
+          role: payload.role,
+          status: payload.status,
+          storeId: targetStoreId,
+          accessScope: targetScope,
+          operatorId: payload.uid,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+    }
 
     if (payload.role === 'admin' && payload.status === 'active') {
       await setDoc(doc(db, 'admins', payload.uid), payload, { merge: true });
@@ -1572,24 +1839,42 @@ class StoreService {
     }
 
     await this.addAuditLog(
-      isNew ? '新增操作者账号' : '更新操作者资料与权限',
+      isNew ? '新增授权手机号账号' : '更新授权账号与范围配置',
       'users',
       payload.uid,
-      `${isNew ? '创建' : '更新'}操作者：${payload.displayName} (${payload.email}) · 角色：${payload.roleName || payload.role} · 状态：${payload.status}`
+      `${isNew ? '授权新账号' : '更新账号'}：${payload.displayName} (手机: ${e164Phone || '未绑'}, 角色: ${
+        payload.roleName || payload.role
+      }, 范围: ${targetScope === 'personal' ? '个人隔离' : '店铺共享'}, 状态: ${payload.status})`
     );
 
     return payload;
   }
 
   public async deleteOperator(uid: string): Promise<void> {
-    const target = this.inMemoryOperators.find(o => o.uid === uid);
-    if (target?.email === 'dingzhou02@gmail.com') {
-      throw new Error('系统最高主理人账号受保护，不可删除');
+    if (!auth.currentUser || this.currentOperator.role !== 'admin') {
+      throw new Error('权限不足：仅系统管理员可撤销账号授权');
     }
+    if (uid === auth.currentUser.uid) {
+      throw new Error('安全保护：不能删除或撤销您当前正在登录使用的管理员账号');
+    }
+    const target = this.inMemoryOperators.find(o => o.uid === uid);
     this.inMemoryOperators = this.inMemoryOperators.filter(o => o.uid !== uid);
+
     await deleteDoc(doc(db, 'users', uid));
+    const targetE164 = normalizePhoneToE164(target?.e164Phone || target?.phone || '');
+    if (targetE164) {
+      try {
+        await deleteDoc(doc(db, 'authorizedPhones', targetE164));
+      } catch {
+        // ignore
+      }
+    }
     if (target?.email) {
-      await deleteDoc(doc(db, 'allowedEmails', target.email.trim().toLowerCase()));
+      try {
+        await deleteDoc(doc(db, 'allowedEmails', target.email.trim().toLowerCase()));
+      } catch {
+        // ignore
+      }
     }
     try {
       await deleteDoc(doc(db, 'admins', uid));
@@ -1597,11 +1882,219 @@ class StoreService {
       // ignore
     }
     await this.addAuditLog(
-      '删除操作者账号',
+      '撤销并移除操作者账号',
       'users',
       uid,
-      `移除操作者账号：${target?.displayName || uid} (${target?.email || ''})`
+      `已撤销账号访问授权：${target?.displayName || uid} (手机: ${targetE164 || '-'}, 邮箱: ${target?.email || '-'})`
     );
+  }
+
+  public async setAuthorizedPhoneStatus(
+    e164Phone: string,
+    status: 'active' | 'inactive' | 'revoked'
+  ): Promise<void> {
+    if (!auth.currentUser || this.currentOperator.role !== 'admin') {
+      throw new Error('权限不足：仅激活状态的系统管理员可修改授权手机号状态');
+    }
+    const cleanPhone = normalizePhoneToE164(e164Phone);
+    if (!cleanPhone) {
+      throw new Error('无效的手机号码');
+    }
+    const now = new Date().toISOString();
+    await setDoc(
+      doc(db, 'authorizedPhones', cleanPhone),
+      { status, updatedAt: now },
+      { merge: true }
+    );
+    const matchingOp = this.inMemoryOperators.find(
+      op => normalizePhoneToE164(op.e164Phone || op.phone || '') === cleanPhone
+    );
+    if (matchingOp) {
+      matchingOp.status = status;
+      matchingOp.updatedAt = now;
+      await setDoc(
+        doc(db, 'users', matchingOp.uid),
+        { status, updatedAt: now },
+        { merge: true }
+      );
+      if (status !== 'active') {
+        try {
+          await deleteDoc(doc(db, 'admins', matchingOp.uid));
+        } catch {
+          // ignore
+        }
+      }
+    }
+    await this.addAuditLog(
+      status === 'active'
+        ? '启用授权手机号'
+        : status === 'revoked'
+        ? '撤销授权手机号'
+        : '停用授权手机号',
+      'authorizedPhones',
+      cleanPhone,
+      `管理员将手机号 ${cleanPhone} 授权状态变更为：${status}`
+    );
+  }
+
+  public async inspectLegacyDataScope(): Promise<LegacyDataInspectionSummary> {
+    return this.inspectLegacyData();
+  }
+
+  /**
+   * 检查现有云端数据库中的业务数据归属状态（客户、订单、量体、面料、款式、储值、历史档案、图片）
+   */
+  public async inspectLegacyData(): Promise<LegacyDataInspectionSummary> {
+    const targetCollections: { name: string; label: string }[] = [
+      { name: 'customers', label: '客户资料 (customers)' },
+      { name: 'measurements', label: '量体记录 (measurements)' },
+      { name: 'orders', label: '定制订单 (orders)' },
+      { name: 'materials', label: '面料库存 (materials)' },
+      { name: 'styles', label: '服装款式 (styles)' },
+      { name: 'wallets', label: '储值账户 (wallets)' },
+      { name: 'walletTransactions', label: '储值流水 (walletTransactions)' },
+      { name: 'customerFiles', label: '历史档案 (customerFiles)' },
+      { name: 'customerImages', label: '客户照片 (customerImages)' },
+    ];
+
+    let totalRecords = 0;
+    let unmigratedCount = 0;
+    let migratedCount = 0;
+    const collectionsSummary: LegacyDataInspectionSummary['collections'] = [];
+
+    for (const col of targetCollections) {
+      try {
+        const snap = await getDocs(collection(db, col.name));
+        let colTotal = 0;
+        let colUnmigrated = 0;
+        let colMigrated = 0;
+        snap.forEach(d => {
+          const data = d.data() as Record<string, any>;
+          if (data.isDeleted) return;
+          colTotal++;
+          if (data.storeId && data.ownerUid) {
+            colMigrated++;
+          } else {
+            colUnmigrated++;
+          }
+        });
+        totalRecords += colTotal;
+        unmigratedCount += colUnmigrated;
+        migratedCount += colMigrated;
+        collectionsSummary.push({
+          collectionName: col.name,
+          label: col.label,
+          total: colTotal,
+          unmigrated: colUnmigrated,
+          migrated: colMigrated,
+        });
+      } catch {
+        collectionsSummary.push({
+          collectionName: col.name,
+          label: col.label,
+          total: 0,
+          unmigrated: 0,
+          migrated: 0,
+        });
+      }
+    }
+
+    return {
+      totalRecords,
+      unmigratedCount,
+      migratedCount,
+      collections: collectionsSummary,
+      lastCheckedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * 安全执行现有业务数据归属迁移（不删除、不覆盖已有业务字段，仅在备份后安全补齐 storeId 与 ownerUid）
+   */
+  public async executeDataScopeMigration(options: {
+    mode: DataAccessScope;
+    targetStoreId?: string;
+  }): Promise<{
+    backedUp: boolean;
+    migratedTotal: number;
+    details: Record<string, number>;
+  }> {
+    if (!auth.currentUser || this.currentOperator.role !== 'admin') {
+      throw new Error('权限不足：仅系统管理员可执行历史数据归属迁移');
+    }
+
+    const adminUid = auth.currentUser.uid;
+    const storeId = options.targetStoreId || this.currentOperator.storeId || DEFAULT_STORE_ID;
+    const now = new Date().toISOString();
+
+    // 1. Pre-migration safety backup
+    let backedUp = false;
+    try {
+      const fullJson = this.exportDataJson();
+      localStorage.setItem(`${LOCAL_STORAGE_PREFIX}pre_scope_migration_backup`, fullJson);
+      backedUp = true;
+    } catch {
+      // ignore local storage quota
+    }
+
+    const targetCollections = [
+      'customers',
+      'measurements',
+      'orders',
+      'materials',
+      'inventoryTransactions',
+      'styles',
+      'wallets',
+      'walletTransactions',
+      'customerFiles',
+      'customerImages',
+      'fileChunks',
+      'settings',
+    ];
+
+    const details: Record<string, number> = {};
+    let migratedTotal = 0;
+
+    for (const colName of targetCollections) {
+      let count = 0;
+      try {
+        const snap = await getDocs(collection(db, colName));
+        for (const docSnap of snap.docs) {
+          const data = docSnap.data() as Record<string, any>;
+          if (!data.storeId || !data.ownerUid) {
+            await setDoc(
+              doc(db, colName, docSnap.id),
+              {
+                storeId: data.storeId || storeId,
+                ownerUid: data.ownerUid || adminUid,
+                scopeMigratedAt: now,
+              },
+              { merge: true }
+            );
+            count++;
+            migratedTotal++;
+          }
+        }
+      } catch (e) {
+        console.warn(`Migration notice on collection ${colName}:`, e);
+      }
+      details[colName] = count;
+    }
+
+    await this.addAuditLog(
+      '历史数据归属范围安全迁移',
+      'system',
+      storeId,
+      `管理员完成现有数据归属迁移：模式=${
+        options.mode === 'personal' ? '个人数据隔离模式' : '店铺共享模式'
+      }，店铺ID=${storeId}，共归属 ${migratedTotal} 条历史记录`
+    );
+
+    return {
+      backedUp,
+      migratedTotal,
+      details,
+    };
   }
 
   public async getRoles(): Promise<RoleDefinition[]> {
@@ -1619,6 +2112,9 @@ class StoreService {
   }
 
   public async saveRole(role: RoleDefinition): Promise<RoleDefinition> {
+    if (!auth.currentUser || this.currentOperator.role !== 'admin') {
+      throw new Error('权限不足：仅管理员可修改角色权限配置');
+    }
     const updated: RoleDefinition = {
       ...role,
       updatedAt: new Date().toISOString(),
@@ -1640,11 +2136,17 @@ class StoreService {
   }
 
   public async getAuditLogs(): Promise<AuditLog[]> {
+    if (!auth.currentUser) return [];
     try {
       const snap = await getDocs(collection(db, 'auditLogs'));
       if (!snap.empty) {
         const list: AuditLog[] = [];
-        snap.forEach(d => list.push(d.data() as AuditLog));
+        snap.forEach(d => {
+          const log = d.data() as AuditLog;
+          if (this.canAccessRecord(log)) {
+            list.push(log);
+          }
+        });
         list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         this.inMemoryAuditLogs = list.slice(0, 100);
       }
@@ -1656,7 +2158,7 @@ class StoreService {
 
   /**
    * 建立跨电脑、iPad、iPhone 的 Firestore 实时监听通道 (onSnapshot)
-   * 任一设备新增或修改客户、量体、订单、面料、储值、历史档案、角色权限时，其他设备自动实时同步
+   * 严格按当前登录账号的 storeId 与 accessScope 过滤，未授权数据绝不流入页面状态
    */
   public subscribeToRealtimeUpdates(callbacks: {
     onCustomers?: (list: Customer[]) => void;
@@ -1673,6 +2175,7 @@ class StoreService {
     onRoles?: (list: RoleDefinition[]) => void;
     onAuditLogs?: (list: AuditLog[]) => void;
   }): Unsubscribe {
+    if (!auth.currentUser) return () => {};
     const unsubs: Unsubscribe[] = [];
 
     if (callbacks.onCustomers) {
@@ -1683,7 +2186,9 @@ class StoreService {
             const list: Customer[] = [];
             snap.forEach(d => {
               const c = d.data() as Customer;
-              if (!c.isDeleted) list.push({ ...c, id: c.id || d.id });
+              if (!c.isDeleted && this.canAccessRecord(c)) {
+                list.push({ ...c, id: c.id || d.id });
+              }
             });
             list.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
             const unique = dedupeById(list);
@@ -1704,7 +2209,9 @@ class StoreService {
             const list: Measurement[] = [];
             snap.forEach(d => {
               const m = d.data() as Measurement;
-              list.push({ ...m, id: m.id || d.id, unit: m.unit || '尺' });
+              if (this.canAccessRecord(m)) {
+                list.push({ ...m, id: m.id || d.id, unit: m.unit || '尺' });
+              }
             });
             list.sort((a, b) => new Date(b.measureDate).getTime() - new Date(a.measureDate).getTime());
             const unique = dedupeById(list);
@@ -1725,7 +2232,9 @@ class StoreService {
             const list: Order[] = [];
             snap.forEach(d => {
               const o = d.data() as Order;
-              list.push({ ...o, id: o.id || d.id });
+              if (this.canAccessRecord(o)) {
+                list.push({ ...o, id: o.id || d.id });
+              }
             });
             list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
             const unique = dedupeById(list);
@@ -1746,7 +2255,9 @@ class StoreService {
             const list: Material[] = [];
             snap.forEach(d => {
               const m = d.data() as Material;
-              if (!m.isDeleted) list.push({ ...m, id: m.id || d.id });
+              if (!m.isDeleted && this.canAccessRecord(m)) {
+                list.push({ ...m, id: m.id || d.id });
+              }
             });
             const unique = dedupeById(list);
             this.inMemoryMaterials = unique;
@@ -1766,7 +2277,9 @@ class StoreService {
             const list: InventoryTransaction[] = [];
             snap.forEach(d => {
               const tx = d.data() as InventoryTransaction;
-              list.push({ ...tx, id: tx.id || d.id });
+              if (this.canAccessRecord(tx)) {
+                list.push({ ...tx, id: tx.id || d.id });
+              }
             });
             list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
             const unique = dedupeById(list);
@@ -1786,7 +2299,9 @@ class StoreService {
             const list: Style[] = [];
             snap.forEach(d => {
               const s = d.data() as Style;
-              list.push({ ...s, id: s.id || d.id });
+              if (this.canAccessRecord(s)) {
+                list.push({ ...s, id: s.id || d.id });
+              }
             });
             const unique = dedupeById(list);
             this.inMemoryStyles = unique;
@@ -1803,18 +2318,18 @@ class StoreService {
         onSnapshot(
           collection(db, 'walletTransactions'),
           snap => {
-            if (!snap.empty) {
-              const list: WalletTransaction[] = [];
-              snap.forEach(d => {
-                const wt = d.data() as WalletTransaction;
+            const list: WalletTransaction[] = [];
+            snap.forEach(d => {
+              const wt = d.data() as WalletTransaction;
+              if (this.canAccessRecord(wt)) {
                 list.push({ ...wt, id: wt.id || d.id });
-              });
-              list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-              const unique = dedupeById(list);
-              this.inMemoryWalletTransactions = unique;
-              this.saveToLocalStorage();
-              callbacks.onWalletTransactions?.(unique);
-            }
+              }
+            });
+            list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            const unique = dedupeById(list);
+            this.inMemoryWalletTransactions = unique;
+            this.saveToLocalStorage();
+            callbacks.onWalletTransactions?.(unique);
           },
           err => console.warn('WalletTransactions realtime listener notice:', err.message)
         )
@@ -1829,7 +2344,9 @@ class StoreService {
             const list: CustomerFile[] = [];
             snap.forEach(d => {
               const cf = d.data() as CustomerFile;
-              list.push({ ...cf, id: cf.id || d.id });
+              if (this.canAccessRecord(cf)) {
+                list.push({ ...cf, id: cf.id || d.id });
+              }
             });
             list.sort((a, b) => b.year - a.year || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
             const unique = dedupeById(list);
@@ -1850,7 +2367,9 @@ class StoreService {
             const list: CustomerImage[] = [];
             snap.forEach(d => {
               const ci = d.data() as CustomerImage;
-              list.push({ ...ci, id: ci.id || d.id });
+              if (this.canAccessRecord(ci)) {
+                list.push({ ...ci, id: ci.id || d.id });
+              }
             });
             list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
             const unique = dedupeById(list);
@@ -1920,7 +2439,12 @@ class StoreService {
           snap => {
             if (!snap.empty) {
               const list: AuditLog[] = [];
-              snap.forEach(d => list.push(d.data() as AuditLog));
+              snap.forEach(d => {
+                const log = d.data() as AuditLog;
+                if (this.canAccessRecord(log)) {
+                  list.push(log);
+                }
+              });
               list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
               this.inMemoryAuditLogs = list.slice(0, 100);
               callbacks.onAuditLogs?.(this.inMemoryAuditLogs);

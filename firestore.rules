@@ -1,198 +1,274 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Default deny all access
-    match /{document=**} {
-      allow read, write: if false;
-    }
 
+    // ===============================================================
+    // 核心安全辅助函数：仅允许已授权的活跃操作员按角色与账号范围访问
+    // ===============================================================
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function isOwner() {
+    // 初始主理人引导验证
+    function isBootstrapOwner() {
       return isSignedIn() &&
-        request.auth.token.email != null &&
-        request.auth.token.email == "dingzhou02@gmail.com";
+        request.auth.token.email == "dingzhou02@gmail.com" &&
+        request.auth.token.email_verified == true;
     }
 
+    function hasUserDoc() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // 系统管理员判定：初始主理人，或在 admins / users 表中具有 active 状态的 admin 角色
     function isAdmin() {
-      return isSignedIn() && (
-        isOwner() ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
-        (
-          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" &&
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == "active"
-        ) ||
-        (
-          request.auth.token.email != null &&
-          exists(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)) &&
-          get(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)).data.role == "admin" &&
-          get(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)).data.status == "active"
-        )
+      return isBootstrapOwner() ||
+        (isSignedIn() &&
+          exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.status == 'active') ||
+        (hasUserDoc() &&
+          getUserData().role == 'admin' &&
+          getUserData().status == 'active');
+    }
+
+    // 活跃授权操作员判定（停用 inactive 或撤销 revoked 账号立即失去所有访问权）
+    function isActiveOperator() {
+      return isAdmin() ||
+        (hasUserDoc() && getUserData().status == 'active');
+    }
+
+    // 获取当前操作员所属店铺 ID
+    function userStoreId() {
+      return isBootstrapOwner()
+        ? 'STORE_QICAI_DEFAULT'
+        : (hasUserDoc() && 'storeId' in getUserData()
+            ? getUserData().storeId
+            : 'STORE_QICAI_DEFAULT');
+    }
+
+    // 获取当前操作员的数据隔离范围 ('store' | 'personal')
+    function userAccessScope() {
+      return isAdmin()
+        ? 'store'
+        : (hasUserDoc() && 'accessScope' in getUserData()
+            ? getUserData().accessScope
+            : 'store');
+    }
+
+    // 校验手机号白名单首次登录绑定合法性（防止自行篡改角色或状态）
+    function isValidPhoneBinding(userId) {
+      return isSignedIn() &&
+        request.auth.uid == userId &&
+        request.auth.token.phone_number != null &&
+        exists(/databases/$(database)/documents/authorizedPhones/$(request.auth.token.phone_number)) &&
+        get(/databases/$(database)/documents/authorizedPhones/$(request.auth.token.phone_number)).data.status == 'active' &&
+        request.resource.data.role == get(/databases/$(database)/documents/authorizedPhones/$(request.auth.token.phone_number)).data.role &&
+        request.resource.data.status == 'active';
+    }
+
+    // 校验邮箱白名单首次登录绑定合法性
+    function isValidEmailBinding(userId) {
+      return isSignedIn() &&
+        request.auth.uid == userId &&
+        request.auth.token.email != null &&
+        exists(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)) &&
+        get(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)).data.status == 'active' &&
+        request.resource.data.role == get(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)).data.role &&
+        request.resource.data.status == 'active';
+    }
+
+    // ===============================================================
+    // 账号级与店铺级数据隔离校验函数 (Account & Store Scope Isolation)
+    // 1. 管理员可访问本店铺数据及尚未迁移的历史存量数据（以便执行安全迁移）。
+    // 2. 普通账号绝不允许访问尚未完成归属迁移的旧数据，必须校验 storeId 一致。
+    // 3. 若账号被设为 'personal'（个人数据隔离模式），则只能读写其本人 ownerUid 的记录。
+    // ===============================================================
+    function canReadScopedDoc(docData) {
+      return isActiveOperator() && (
+        isAdmin()
+          ? (!('storeId' in docData) || docData.storeId == userStoreId())
+          : (
+              ('storeId' in docData && docData.storeId == userStoreId()) &&
+              (userAccessScope() == 'store' || ('ownerUid' in docData && docData.ownerUid == request.auth.uid))
+            )
       );
     }
 
-    function isStaff() {
-      return isSignedIn() && (
-        isOwner() ||
+    function canCreateScopedDoc() {
+      return isActiveOperator() && (
         isAdmin() ||
         (
-          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == "active"
-        ) ||
-        (
-          request.auth.token.email != null &&
-          exists(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)) &&
-          get(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)).data.status == "active"
+          request.resource.data.storeId == userStoreId() &&
+          request.resource.data.ownerUid == request.auth.uid
         )
       );
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    function canUpdateScopedDoc() {
+      return canReadScopedDoc(resource.data) && (
+        isAdmin() ||
+        (
+          request.resource.data.storeId == resource.data.storeId &&
+          request.resource.data.ownerUid == resource.data.ownerUid
+        )
+      );
     }
 
-    // Admins collection
-    match /admins/{userId} {
-      allow read: if isStaff();
-      allow write: if isAdmin();
+    function canDeleteScopedDoc() {
+      return canReadScopedDoc(resource.data);
     }
 
-    // Whitelisted operator emails
-    match /allowedEmails/{email} {
-      allow read: if isSignedIn() && (isStaff() || request.auth.token.email == email);
-      allow write: if isAdmin();
-    }
-
-    // Roles & permissions collection
-    match /roles/{roleId} {
-      allow read: if isStaff();
-      allow write: if isAdmin();
-    }
-
-    // Users (staff / operators) collection
-    match /users/{userId} {
-      allow read: if isStaff() || (isSignedIn() && request.auth.uid == userId);
-      allow create: if isAdmin() || (isOwner() && request.auth.uid == userId);
+    // ===============================================================
+    // 1. 授权手机号白名单表 (/authorizedPhones/{phoneId})
+    //    禁止未授权枚举列表；仅管理员可创建/停用/撤销，本人首次登录仅可写入 boundUid
+    // ===============================================================
+    match /authorizedPhones/{phoneId} {
+      allow get: if isAdmin() || (isSignedIn() && request.auth.token.phone_number == phoneId);
+      allow list: if isAdmin();
+      allow create, delete: if isAdmin();
       allow update: if isAdmin() || (
-        isStaff() &&
+        isSignedIn() &&
+        request.auth.token.phone_number == phoneId &&
+        resource.data.status == 'active' &&
+        (!('boundUid' in resource.data) || resource.data.boundUid == null || resource.data.boundUid == '' || resource.data.boundUid == request.auth.uid) &&
+        request.resource.data.boundUid == request.auth.uid &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.status == resource.data.status &&
+        request.resource.data.storeId == resource.data.storeId &&
+        request.resource.data.accessScope == resource.data.accessScope
+      );
+    }
+
+    // ===============================================================
+    // 2. 操作者账号、管理员名录与角色权限矩阵
+    //    严禁普通用户通过前端修改 role、roleId、status、storeId 或 accessScope 提权
+    // ===============================================================
+    match /admins/{adminId} {
+      allow read: if isActiveOperator();
+      allow write: if isAdmin();
+    }
+
+    match /allowedEmails/{emailId} {
+      allow get: if isSignedIn() && (isAdmin() || request.auth.token.email == emailId);
+      allow list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && (isAdmin() || request.auth.uid == userId);
+      allow list: if isActiveOperator();
+      allow create: if isAdmin() || isValidPhoneBinding(userId) || isValidEmailBinding(userId);
+      allow update: if isAdmin() || (
+        isActiveOperator() &&
         request.auth.uid == userId &&
         request.resource.data.role == resource.data.role &&
-        request.resource.data.status == resource.data.status
+        request.resource.data.status == resource.data.status &&
+        (!('storeId' in resource.data) || request.resource.data.storeId == resource.data.storeId) &&
+        (!('accessScope' in resource.data) || request.resource.data.accessScope == resource.data.accessScope)
       );
       allow delete: if isAdmin();
     }
 
-    // Chunked cloud file storage for PDFs and high-res photos
-    match /fileChunks/{chunkId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff() && isValidId(chunkId);
-      allow delete: if isStaff();
+    match /roles/{roleId} {
+      allow read: if isActiveOperator();
+      allow write: if isAdmin();
     }
 
-    // Customers collection
+    // ===============================================================
+    // 3. 业务数据集合（全面启用 storeId 与 ownerUid 账号级隔离校验）
+    // ===============================================================
     match /customers/{customerId} {
-      allow read: if isStaff();
-      allow create: if isStaff() && isValidId(customerId);
-      allow update: if isStaff() && isValidId(customerId);
-      allow delete: if isStaff();
+      allow read: if canReadScopedDoc(resource.data);
+      allow create: if canCreateScopedDoc();
+      allow update: if canUpdateScopedDoc();
+      allow delete: if canDeleteScopedDoc();
     }
 
-    // Measurements collection
     match /measurements/{measurementId} {
-      allow read: if isStaff();
-      allow create: if isStaff() && isValidId(measurementId);
-      allow update: if isStaff() && isValidId(measurementId);
-      allow delete: if isStaff();
+      allow read: if canReadScopedDoc(resource.data);
+      allow create: if canCreateScopedDoc();
+      allow update: if canUpdateScopedDoc();
+      allow delete: if canDeleteScopedDoc();
     }
 
-    // Materials and inventory
     match /materials/{materialId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff() && isValidId(materialId);
-      allow delete: if isStaff();
+      allow read: if canReadScopedDoc(resource.data);
+      allow create: if canCreateScopedDoc();
+      allow update: if canUpdateScopedDoc();
+      allow delete: if canDeleteScopedDoc();
     }
 
-    match /inventoryTransactions/{transactionId} {
-      allow read: if isStaff();
-      allow create: if isStaff() && isValidId(transactionId);
-      allow update, delete: if false; // Inventory log is strictly immutable
+    match /inventoryTransactions/{txId} {
+      allow read: if canReadScopedDoc(resource.data);
+      allow create: if canCreateScopedDoc();
+      allow update: if canUpdateScopedDoc();
+      allow delete: if isAdmin();
     }
 
-    // Styles catalog
     match /styles/{styleId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff() && isValidId(styleId);
-      allow delete: if isStaff();
+      allow read: if canReadScopedDoc(resource.data);
+      allow create: if canCreateScopedDoc();
+      allow update: if canUpdateScopedDoc();
+      allow delete: if canDeleteScopedDoc();
     }
 
-    // Orders and OrderItems
     match /orders/{orderId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff() && isValidId(orderId);
-      allow delete: if isStaff();
+      allow read: if canReadScopedDoc(resource.data);
+      allow create: if canCreateScopedDoc();
+      allow update: if canUpdateScopedDoc();
+      allow delete: if canDeleteScopedDoc();
     }
 
-    match /orderItems/{itemId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff() && isValidId(itemId);
-      allow delete: if isStaff();
-    }
-
-    match /orderPayments/{paymentId} {
-      allow read: if isStaff();
-      allow create: if isStaff() && isValidId(paymentId);
-      allow update, delete: if false; // Payment ledger is immutable
-    }
-
-    // Wallets and WalletTransactions
     match /wallets/{customerId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff() && isValidId(customerId);
-      allow delete: if false;
+      allow read: if canReadScopedDoc(resource.data);
+      allow create: if canCreateScopedDoc();
+      allow update: if canUpdateScopedDoc();
+      allow delete: if isAdmin();
     }
 
-    match /walletTransactions/{transactionId} {
-      allow read: if isStaff();
-      allow create: if isStaff() && isValidId(transactionId);
-      allow update, delete: if false; // Financial ledger is strictly immutable
+    match /walletTransactions/{txId} {
+      allow read: if canReadScopedDoc(resource.data);
+      allow create: if canCreateScopedDoc();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
-    match /paymentOrders/{paymentOrderId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff() && isValidId(paymentOrderId);
-      allow delete: if false;
-    }
-
-    // Customer Archives and Images
     match /customerFiles/{fileId} {
-      allow read: if isStaff();
-      allow create: if isStaff() && isValidId(fileId);
-      allow update: if isStaff() && isValidId(fileId);
-      allow delete: if isStaff();
+      allow read: if canReadScopedDoc(resource.data);
+      allow create: if canCreateScopedDoc();
+      allow update: if canUpdateScopedDoc();
+      allow delete: if canDeleteScopedDoc();
     }
 
     match /customerImages/{imageId} {
-      allow read: if isStaff();
-      allow create: if isStaff() && isValidId(imageId);
-      allow update: if isStaff() && isValidId(imageId);
-      allow delete: if isStaff();
+      allow read: if canReadScopedDoc(resource.data);
+      allow create: if canCreateScopedDoc();
+      allow update: if canUpdateScopedDoc();
+      allow delete: if canDeleteScopedDoc();
     }
 
-    // Settings
+    match /fileChunks/{chunkId} {
+      allow read: if canReadScopedDoc(resource.data);
+      allow create: if canCreateScopedDoc();
+      allow update: if canUpdateScopedDoc();
+      allow delete: if canDeleteScopedDoc();
+    }
+
     match /settings/{settingId} {
-      allow read: if isStaff();
-      allow write: if isAdmin() || isStaff();
+      allow read: if isActiveOperator();
+      allow write: if isAdmin();
     }
 
-    // Audit logs
     match /auditLogs/{logId} {
-      allow read: if isStaff();
-      allow create: if isStaff() && isValidId(logId);
-      allow update, delete: if false; // Audit trail is strictly immutable
+      allow read: if canReadScopedDoc(resource.data);
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
     }
   }
 }

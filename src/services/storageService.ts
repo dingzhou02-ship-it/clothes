@@ -22,6 +22,18 @@ const blobUrlCache = new Map<string, string>();
 // Local fallback cache for chunks in case of brief offline state
 const localChunkCache = new Map<string, string>();
 
+let activeStorageContext: {
+  storeId: string;
+  ownerUid: string;
+  accessScope: 'store' | 'personal';
+  role: 'admin' | 'staff';
+} = {
+  storeId: 'STORE_QICAI_DEFAULT',
+  ownerUid: '',
+  accessScope: 'store',
+  role: 'staff',
+};
+
 function dataUrlToBlob(dataUrl: string, fallbackMime = 'application/octet-stream'): Blob {
   const commaIdx = dataUrl.indexOf(',');
   if (commaIdx === -1) {
@@ -74,6 +86,20 @@ function compressImageDataUrl(dataUrl: string, maxDim = 1600, quality = 0.82): P
 }
 
 export const storageService = {
+  setStorageScope(
+    storeId: string,
+    ownerUid: string,
+    accessScope: 'store' | 'personal' = 'store',
+    role: 'admin' | 'staff' = 'staff'
+  ) {
+    activeStorageContext = {
+      storeId: storeId || 'STORE_QICAI_DEFAULT',
+      ownerUid,
+      accessScope,
+      role,
+    };
+  },
+
   /**
    * 上传客户历史档案、试衣照片或面料图片至云端安全存储 (Firestore fileChunks 分片云存储)
    * - 彻底解决 Firebase Storage 未开通/CORS跨域导致进度卡在 0% 的问题
@@ -164,6 +190,8 @@ export const storageService = {
         totalChunks,
         data: slice,
         mimeType,
+        storeId: activeStorageContext.storeId || 'STORE_QICAI_DEFAULT',
+        ownerUid: auth.currentUser?.uid || activeStorageContext.ownerUid || '',
         createdAt: nowIso,
       };
 
@@ -390,6 +418,12 @@ export const storageService = {
     });
     blobUrlCache.clear();
     localChunkCache.clear();
+    activeStorageContext = {
+      storeId: 'STORE_QICAI_DEFAULT',
+      ownerUid: '',
+      accessScope: 'store',
+      role: 'staff',
+    };
   },
 };
 
