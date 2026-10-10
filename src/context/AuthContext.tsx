@@ -710,7 +710,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       if (code === 'auth/operation-not-allowed') {
         throw new Error(
-          '当前 Firebase 项目尚未启用「邮箱/密码」登录。请使用手机号验证码或 Google 官方认证登录。'
+          'Firebase 控制台尚未启用「邮箱/密码 (Email/Password)」登录提供方。请在 Firebase Console -> Authentication -> Sign-in method 中将 Email/Password 设为启用 (Enabled)。'
         );
       }
       if (
@@ -720,7 +720,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ) {
         throw new Error('账号或密码不正确，请核对后重试');
       }
-      throw new Error(formatFirebasePhoneAuthError(error));
+      if (code === 'auth/too-many-requests') {
+        throw new Error('登录失败尝试过多，账号已被临时锁定，请稍后再试或通过「忘记密码」重置密码');
+      }
+      throw new Error(error?.message || '登录失败，请检查网络后重试');
     }
   };
 

@@ -184,7 +184,8 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </div>
             <p className="text-[10px] text-stone-400 font-mono">
-              {currentUser?.phone ||
+              {currentUser?.email ||
+                currentUser?.phone ||
                 currentRole?.name ||
                 currentUser?.roleName ||
                 (currentUser?.role === 'admin' ? '系统管理员/主理人' : '普通操作员')}

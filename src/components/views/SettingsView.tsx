@@ -904,16 +904,16 @@ startxref
             </form>
           </div>
 
-          {/* 2. 手机号短信验证码白名单与操作者账号隔离管理 (Admin Only) */}
+          {/* 2. 操作者账号授权与数据隔离管理 (Admin Only) */}
           <div className="bg-white rounded-2xl border border-stone-200 p-5 shadow-xs space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
               <div>
                 <h3 className="text-sm font-bold text-stone-900 flex items-center space-x-2">
                   <Users className="w-4 h-4 text-amber-600" />
-                  <span>授权手机号白名单与账号数据隔离管理（短信验证码登录准入控制）</span>
+                  <span>管理员账号授权与数据隔离管理（UID 准入与权限控制）</span>
                 </h3>
                 <p className="text-[11px] text-stone-400 mt-0.5">
-                  仅在此授权名单中且状态为“正常启用”的手机号可通过短信验证码进入系统；首次登录自动强绑定唯一 Firebase UID，严防未授权号码访问
+                  通过 Firebase Authentication 邮箱密码认证；所有业务记录与文件受 UID 和角色隔离保护，未授权访客严防读取任何客户资料
                 </p>
               </div>
               {hasPermission('operatorManage') && (
@@ -923,7 +923,7 @@ startxref
                   className="px-3.5 py-2 bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 cursor-pointer shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5 text-amber-400" />
-                  <span>新增授权手机号 / 操作员</span>
+                  <span>新增授权账号</span>
                 </button>
               )}
             </div>
